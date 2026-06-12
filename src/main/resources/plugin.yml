@@ -1,6 +1,6 @@
 name: coffeelib
 description: $description
-prefix: Survive
+prefix: CoffeeLib
 version: '${version}'
 
 main: net.loyalnetwork.coffeelib.CoffeeLib
