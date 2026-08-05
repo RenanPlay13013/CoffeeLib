@@ -8,6 +8,12 @@ repositories {
     maven("https://repo.papermc.io/repository/maven-public/")
 }
 
+tasks.processResources {
+    filesMatching("plugin.yml") {
+        expand("version" to project.version)
+    }
+}
+
 dependencies {
     api(project(":coffeelib-core"))
 
