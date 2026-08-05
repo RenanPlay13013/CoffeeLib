@@ -1,0 +1,10 @@
+# JitPack provisiona o JDK via SDKMAN. Espelhamos o ambiente de desenvolvimento:
+# daemon do Gradle no JDK 21, com JDK 17 também instalado (toolchain do Forge 1.20.1).
+# Ter ambos instalados localmente evita que o ForgeGradle caia no resolver do
+# foojay (que quebra com o erro "DefaultToolchainSpec ... project services has
+# been closed") durante o setup do MCP.
+before_install:
+   - sdk update
+   - sdk install java 17.0.12-oracle
+   - sdk install java 21-tem
+   - sdk use java 21-tem
