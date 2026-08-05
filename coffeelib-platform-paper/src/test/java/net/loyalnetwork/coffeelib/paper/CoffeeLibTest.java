@@ -1,9 +1,9 @@
 package net.loyalnetwork.coffeelib.paper;
 
-import net.loyalnetwork.coffeelib.api.ConfigManager;
-import net.loyalnetwork.coffeelib.api.annotation.Comment;
-import net.loyalnetwork.coffeelib.api.annotation.ConfigFile;
-import net.loyalnetwork.coffeelib.api.annotation.Range;
+import net.loyalnetwork.coffeelib.api.config.ConfigManager;
+import net.loyalnetwork.coffeelib.api.config.annotation.Comment;
+import net.loyalnetwork.coffeelib.api.config.annotation.ConfigFile;
+import net.loyalnetwork.coffeelib.api.config.annotation.Range;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

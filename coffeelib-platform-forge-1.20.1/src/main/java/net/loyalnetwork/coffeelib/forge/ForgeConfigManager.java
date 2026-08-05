@@ -1,13 +1,13 @@
 package net.loyalnetwork.coffeelib.forge;
 
-import net.loyalnetwork.coffeelib.api.ConfigManager;
-import net.loyalnetwork.coffeelib.api.annotation.Comment;
-import net.loyalnetwork.coffeelib.api.annotation.ConfigFile;
-import net.loyalnetwork.coffeelib.api.annotation.Ignore;
-import net.loyalnetwork.coffeelib.api.annotation.Key;
-import net.loyalnetwork.coffeelib.api.annotation.OneOf;
-import net.loyalnetwork.coffeelib.api.annotation.Range;
-import net.loyalnetwork.coffeelib.api.exception.ConfigException;
+import net.loyalnetwork.coffeelib.api.config.ConfigManager;
+import net.loyalnetwork.coffeelib.api.config.annotation.Comment;
+import net.loyalnetwork.coffeelib.api.config.annotation.ConfigFile;
+import net.loyalnetwork.coffeelib.api.config.annotation.Ignore;
+import net.loyalnetwork.coffeelib.api.config.annotation.Key;
+import net.loyalnetwork.coffeelib.api.config.annotation.OneOf;
+import net.loyalnetwork.coffeelib.api.config.annotation.Range;
+import net.loyalnetwork.coffeelib.api.config.exception.ConfigException;
 import net.minecraftforge.common.ForgeConfigSpec;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.ModLoadingContext;

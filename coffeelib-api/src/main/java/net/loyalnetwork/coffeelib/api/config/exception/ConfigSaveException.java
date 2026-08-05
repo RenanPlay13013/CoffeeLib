@@ -1,4 +1,4 @@
-package net.loyalnetwork.coffeelib.api.exception;
+package net.loyalnetwork.coffeelib.api.config.exception;
 
 /** Raised when a config file cannot be written by the backend. */
 public class ConfigSaveException extends ConfigException {

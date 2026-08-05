@@ -1,12 +1,12 @@
-package net.loyalnetwork.coffeelib.core;
+package net.loyalnetwork.coffeelib.core.config;
 
-import net.loyalnetwork.coffeelib.api.ConfigManager;
-import net.loyalnetwork.coffeelib.api.annotation.Comment;
-import net.loyalnetwork.coffeelib.api.annotation.ConfigFile;
-import net.loyalnetwork.coffeelib.api.annotation.OneOf;
-import net.loyalnetwork.coffeelib.api.annotation.Range;
-import net.loyalnetwork.coffeelib.api.exception.ConfigException;
-import net.loyalnetwork.coffeelib.api.exception.ConfigValidationException;
+import net.loyalnetwork.coffeelib.api.config.ConfigManager;
+import net.loyalnetwork.coffeelib.api.config.annotation.Comment;
+import net.loyalnetwork.coffeelib.api.config.annotation.ConfigFile;
+import net.loyalnetwork.coffeelib.api.config.annotation.OneOf;
+import net.loyalnetwork.coffeelib.api.config.annotation.Range;
+import net.loyalnetwork.coffeelib.api.config.exception.ConfigException;
+import net.loyalnetwork.coffeelib.api.config.exception.ConfigValidationException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 

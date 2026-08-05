@@ -1,7 +1,7 @@
 package net.loyalnetwork.coffeelib.paper;
 
-import net.loyalnetwork.coffeelib.api.ConfigManager;
-import net.loyalnetwork.coffeelib.core.DefaultConfigManager;
+import net.loyalnetwork.coffeelib.api.config.ConfigManager;
+import net.loyalnetwork.coffeelib.core.config.DefaultConfigManager;
 import org.bukkit.plugin.java.JavaPlugin;
 
 /** Entry point for the Paper platform. */

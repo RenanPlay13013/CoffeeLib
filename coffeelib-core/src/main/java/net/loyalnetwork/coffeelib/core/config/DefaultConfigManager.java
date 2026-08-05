@@ -1,10 +1,10 @@
-package net.loyalnetwork.coffeelib.core;
+package net.loyalnetwork.coffeelib.core.config;
 
-import net.loyalnetwork.coffeelib.api.ConfigBackend;
-import net.loyalnetwork.coffeelib.api.ConfigManager;
-import net.loyalnetwork.coffeelib.api.exception.ConfigException;
-import net.loyalnetwork.coffeelib.api.exception.ConfigLoadException;
-import net.loyalnetwork.coffeelib.api.exception.ConfigSaveException;
+import net.loyalnetwork.coffeelib.api.config.ConfigBackend;
+import net.loyalnetwork.coffeelib.api.config.ConfigManager;
+import net.loyalnetwork.coffeelib.api.config.exception.ConfigException;
+import net.loyalnetwork.coffeelib.api.config.exception.ConfigLoadException;
+import net.loyalnetwork.coffeelib.api.config.exception.ConfigSaveException;
 
 import java.io.IOException;
 import java.lang.reflect.Constructor;

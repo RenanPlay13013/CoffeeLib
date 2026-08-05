@@ -1,6 +1,6 @@
 package net.loyalnetwork.coffeelib.neoforge;
 
-import net.loyalnetwork.coffeelib.api.ConfigManager;
+import net.loyalnetwork.coffeelib.api.config.ConfigManager;
 import net.neoforged.fml.ModContainer;
 
 /** Entry point for the NeoForge platform. */

@@ -1,8 +1,8 @@
-package net.loyalnetwork.coffeelib.core;
+package net.loyalnetwork.coffeelib.core.config;
 
 import lombok.Getter;
-import net.loyalnetwork.coffeelib.api.annotation.OneOf;
-import net.loyalnetwork.coffeelib.api.annotation.Range;
+import net.loyalnetwork.coffeelib.api.config.annotation.OneOf;
+import net.loyalnetwork.coffeelib.api.config.annotation.Range;
 
 import java.lang.reflect.Field;
 import java.util.List;

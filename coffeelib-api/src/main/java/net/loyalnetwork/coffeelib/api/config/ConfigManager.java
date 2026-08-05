@@ -1,6 +1,6 @@
-package net.loyalnetwork.coffeelib.api;
+package net.loyalnetwork.coffeelib.api.config;
 
-import net.loyalnetwork.coffeelib.api.exception.ConfigException;
+import net.loyalnetwork.coffeelib.api.config.exception.ConfigException;
 
 /**
  * Entry point a developer holds on to. Bound to a single owner's environment
@@ -13,7 +13,7 @@ public interface ConfigManager {
     /**
      * Loads (creating with defaults on first run) the config backed by
      * {@code type}. {@code type} must be annotated with
-     * {@link net.loyalnetwork.coffeelib.api.annotation.ConfigFile} and expose
+     * {@link net.loyalnetwork.coffeelib.api.config.annotation.ConfigFile} and expose
      * a public no-args constructor.
      *
      * @throws ConfigException if the file exists but fails to parse, or a

@@ -1,6 +1,6 @@
 package net.loyalnetwork.coffeelib.forge;
 
-import net.loyalnetwork.coffeelib.api.ConfigManager;
+import net.loyalnetwork.coffeelib.api.config.ConfigManager;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 
 /** Entry point for the Forge platform. */

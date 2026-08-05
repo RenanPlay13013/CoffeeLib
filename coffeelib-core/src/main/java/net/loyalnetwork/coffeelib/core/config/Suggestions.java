@@ -1,4 +1,4 @@
-package net.loyalnetwork.coffeelib.core;
+package net.loyalnetwork.coffeelib.core.config;
 
 import java.util.Comparator;
 import java.util.List;

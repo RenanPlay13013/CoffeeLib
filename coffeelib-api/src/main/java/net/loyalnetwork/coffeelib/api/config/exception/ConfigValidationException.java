@@ -1,11 +1,11 @@
-package net.loyalnetwork.coffeelib.api.exception;
+package net.loyalnetwork.coffeelib.api.config.exception;
 
 import java.util.List;
 
 /**
  * Raised when a loaded value fails a constraint declared on the field (e.g.
- * {@link net.loyalnetwork.coffeelib.api.annotation.Range},
- * {@link net.loyalnetwork.coffeelib.api.annotation.OneOf}).
+ * {@link net.loyalnetwork.coffeelib.api.config.annotation.Range},
+ * {@link net.loyalnetwork.coffeelib.api.config.annotation.OneOf}).
  * <p>
  * Carries the offending field/value plus, when the validator can produce
  * one, a ranked list of suggestions (closest match first) — so callers can

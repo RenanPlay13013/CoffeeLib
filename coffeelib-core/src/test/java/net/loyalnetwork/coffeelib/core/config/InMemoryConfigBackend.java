@@ -1,6 +1,6 @@
-package net.loyalnetwork.coffeelib.core;
+package net.loyalnetwork.coffeelib.core.config;
 
-import net.loyalnetwork.coffeelib.api.ConfigBackend;
+import net.loyalnetwork.coffeelib.api.config.ConfigBackend;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;

@@ -1,4 +1,4 @@
-package net.loyalnetwork.coffeelib.api.annotation;
+package net.loyalnetwork.coffeelib.api.config.annotation;
 
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;

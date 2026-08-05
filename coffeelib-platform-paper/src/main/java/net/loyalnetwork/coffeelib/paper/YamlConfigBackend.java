@@ -1,8 +1,8 @@
 package net.loyalnetwork.coffeelib.paper;
 
-import net.loyalnetwork.coffeelib.api.ConfigBackend;
-import net.loyalnetwork.coffeelib.api.exception.ConfigLoadException;
-import net.loyalnetwork.coffeelib.api.exception.ConfigSaveException;
+import net.loyalnetwork.coffeelib.api.config.ConfigBackend;
+import net.loyalnetwork.coffeelib.api.config.exception.ConfigLoadException;
+import net.loyalnetwork.coffeelib.api.config.exception.ConfigSaveException;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;

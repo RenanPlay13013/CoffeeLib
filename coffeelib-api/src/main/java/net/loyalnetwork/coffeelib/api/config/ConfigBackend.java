@@ -1,7 +1,7 @@
-package net.loyalnetwork.coffeelib.api;
+package net.loyalnetwork.coffeelib.api.config;
 
-import net.loyalnetwork.coffeelib.api.exception.ConfigLoadException;
-import net.loyalnetwork.coffeelib.api.exception.ConfigSaveException;
+import net.loyalnetwork.coffeelib.api.config.exception.ConfigLoadException;
+import net.loyalnetwork.coffeelib.api.config.exception.ConfigSaveException;
 
 import java.nio.file.Path;
 import java.util.Map;

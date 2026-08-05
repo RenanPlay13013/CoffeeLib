@@ -1,6 +1,6 @@
-package net.loyalnetwork.coffeelib.core;
+package net.loyalnetwork.coffeelib.core.config;
 
-import net.loyalnetwork.coffeelib.api.exception.ConfigLoadException;
+import net.loyalnetwork.coffeelib.api.config.exception.ConfigLoadException;
 
 /** Converts between a field's declared Java type and the raw value a {@code ConfigBackend} works with. */
 final class FieldCodec {
