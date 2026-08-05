@@ -47,6 +47,17 @@ neoForge {
 
 dependencies {
     api(project(":coffeelib-core"))
+
+    testImplementation("org.mockito:mockito-core:5.14.2")
+}
+
+// ModDevGradle only wires the NeoForge/FML classpath onto the main source set;
+// tests that touch ModContainer/ModConfigSpec/etc. need it too.
+sourceSets {
+    test {
+        compileClasspath += sourceSets.main.compileClasspath
+        runtimeClasspath += sourceSets.main.runtimeClasspath
+    }
 }
 
 // Bakes mod_id/mod_version/etc. from gradle.properties into mods.toml via src/main/templates.
