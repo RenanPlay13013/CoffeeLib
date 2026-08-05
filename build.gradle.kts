@@ -1,3 +1,7 @@
+plugins {
+    base
+}
+
 allprojects {
     group = "net.loyalnetwork"
     version = "1.0-SNAPSHOT"
@@ -38,14 +42,22 @@ subprojects {
     }
 }
 
-val distDir = layout.buildDirectory.dir("dist")
+val distDir = layout.projectDirectory.dir("dist")
 
 tasks.register<Copy>("assembleDist") {
     group = "distribution"
-    description = "Builds every subproject and copies the resulting jars into build/dist."
+    description = "Builds every subproject and copies the resulting jars into ./dist."
 
     dependsOn(subprojects.map { it.tasks.named("jar") })
 
     from(subprojects.map { it.tasks.named("jar") })
     into(distDir)
+}
+
+// `base` gives the root project its own "build" task; an unqualified
+// `./gradlew build` already runs every subproject's "build" too (Gradle
+// matches the task name across all projects by default), so this just adds
+// the dist-folder copy to that same invocation instead of a separate step.
+tasks.named("build") {
+    dependsOn("assembleDist")
 }

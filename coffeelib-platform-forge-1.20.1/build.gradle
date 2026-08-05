@@ -8,7 +8,10 @@ version = mod_version
 group = mod_group_id
 
 base {
-    archivesName = mod_id
+    // Not mod_id — that's "coffeelib" on every platform module by design, which
+    // would make every one of them produce an identically named jar once they're
+    // all copied into the same dist/ folder.
+    archivesName = 'coffeelib-forge-1.20.1'
 }
 
 java.toolchain.languageVersion = JavaLanguageVersion.of(17) // Mojang ships Java 17 to end users in 1.18+.

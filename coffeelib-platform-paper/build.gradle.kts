@@ -1,3 +1,9 @@
+// Project name is "coffeelib-platform-paper" — strip "platform-" so this
+// matches the other platform modules' jar naming (coffeelib-forge-1.20.1, etc.).
+base {
+    archivesName.set("coffeelib-paper")
+}
+
 repositories {
     maven("https://repo.papermc.io/repository/maven-public/")
 }
