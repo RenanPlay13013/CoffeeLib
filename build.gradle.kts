@@ -6,6 +6,18 @@ allprojects {
 subprojects {
     apply(plugin = "java-library")
 
+    // Baseline for api/core/paper: the lowest Java version any supported
+    // platform module requires (currently Forge 1.20.1's toolchain). A
+    // module needing a newer JVM (e.g. NeoForge 1.21.1) overrides this in
+    // its own build script — Gradle refuses to let a lower-toolchain module
+    // depend on a higher-bytecode one, so this must stay the floor, not a
+    // per-module default.
+    extensions.configure<JavaPluginExtension> {
+        toolchain {
+            languageVersion.set(JavaLanguageVersion.of(17))
+        }
+    }
+
     repositories {
         mavenCentral()
     }
