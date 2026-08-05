@@ -17,6 +17,11 @@ tasks.processResources {
 dependencies {
     api(project(":coffeelib-core"))
 
+    // Configurate is the YAML engine here — it replaces the hand-rolled YamlFormat.
+    // Yanked/implementation so configurate's own types never leak into this module's
+    // public API (only ConfigBackend, which YAML jams, is exposed).
+    implementation("org.spongepowered:configurate-yaml:4.2.0")
+
     // PaperMC's own paper-api artifact only goes back to 1.9.4 in their repo —
     // Paper 1.8 was never published there under its own coordinates. Spigot's
     // API is the actual baseline Paper 1.8 implemented, and JavaPlugin/

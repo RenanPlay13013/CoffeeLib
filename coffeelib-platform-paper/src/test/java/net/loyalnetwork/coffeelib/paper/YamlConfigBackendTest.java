@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class YamlConfigBackendTest {
 
     @Test
-    void writeThenReadRoundTripsValuesAndPreservesComments(@TempDir Path tempDir) throws IOException {
+    void writeThenReadRoundTripsScalarValues(@TempDir Path tempDir) throws IOException {
         YamlConfigBackend backend = new YamlConfigBackend();
         Path file = tempDir.resolve("server.yml");
 
@@ -25,22 +25,21 @@ class YamlConfigBackendTest {
         values.put("motd", "Servidor: teste # oficial");
         values.put("online", true);
 
-        Map<String, String> comments = Map.of("host", "Servidor principal");
-
-        backend.write(file, values, comments);
+        backend.write(file, values, Map.of("host", "Servidor principal"));
 
         String raw = Files.readString(file);
         assertTrue(raw.contains("# Servidor principal"), "comment should survive the write");
+        assertTrue(raw.contains("host: localhost"), "configurate should serialize the key/value pairs");
 
         Map<String, Object> read = backend.read(file);
         assertEquals("localhost", read.get("host"));
-        assertEquals(3306L, read.get("port"));
+        assertEquals(3306, read.get("port"));
         assertEquals("Servidor: teste # oficial", read.get("motd"));
         assertEquals(true, read.get("online"));
     }
 
     @Test
-    void writeThenReadRoundTripsNestedSectionsAndTheirComments(@TempDir Path tempDir) {
+    void writeThenReadRoundTripsNestedSections(@TempDir Path tempDir) throws IOException {
         YamlConfigBackend backend = new YamlConfigBackend();
         Path file = tempDir.resolve("app.yml");
 
@@ -57,12 +56,14 @@ class YamlConfigBackendTest {
         values.put("name", "coffee");
         values.put("database", database);
 
-        Map<String, String> comments = Map.of(
+        backend.write(file, values, Map.of(
                 "database.host", "Host do banco de dados",
                 "database.credentials.username", "Usuário administrativo"
-        );
+        ));
 
-        backend.write(file, values, comments);
+        String raw = Files.readString(file);
+        assertTrue(raw.contains("  # Host do banco de dados"));
+        assertTrue(raw.contains("    # Usuário administrativo"));
 
         Map<String, Object> read = backend.read(file);
         assertEquals("coffee", read.get("name"));
@@ -70,7 +71,7 @@ class YamlConfigBackendTest {
         @SuppressWarnings("unchecked")
         Map<String, Object> readDatabase = (Map<String, Object>) read.get("database");
         assertEquals("db.local", readDatabase.get("host"));
-        assertEquals(5432L, readDatabase.get("port"));
+        assertEquals(5432, readDatabase.get("port"));
 
         @SuppressWarnings("unchecked")
         Map<String, Object> readCredentials = (Map<String, Object>) readDatabase.get("credentials");
