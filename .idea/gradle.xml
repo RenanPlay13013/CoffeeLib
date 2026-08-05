@@ -16,6 +16,7 @@
             <option value="$PROJECT_DIR$/coffeelib-platform-paper" />
           </set>
         </option>
+        <option name="resolveExternalAnnotations" value="true" />
         <option name="myGradleHome" value="C:\gradle-9.1.0" />
       </GradleProjectSettings>
     </option>

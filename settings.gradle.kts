@@ -6,6 +6,12 @@ pluginManagement {
     }
 }
 
+plugins {
+    // Lets ModDevGradle auto-provision the exact JDK a module's toolchain asks
+    // for, instead of failing when only a different major version is installed.
+    id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
+}
+
 rootProject.name = "CoffeeLib-All"
 
 include(
