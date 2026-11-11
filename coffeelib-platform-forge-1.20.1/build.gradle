@@ -118,9 +118,14 @@ tasks.named('processResources', ProcessResources).configure {
 }
 
 // reobfJar rewrites the jar in place after jar builds it, remapping to the SRG names a
-// real Forge runtime patches. Without this, ./gradlew build races it and dist ends up
-// with the un-remapped jar, which would then fail outside a dev run.
+// real Forge runtime patches. It is a finalizer of jar, not a dependency of whatever
+// consumes the jar, so anything that copies or publishes the file has to wait for it
+// explicitly or it can pick up the un-remapped one.
 rootProject.tasks.named('assembleDist').configure {
+    dependsOn tasks.named('reobfJar')
+}
+
+tasks.withType(AbstractPublishToMaven).configureEach {
     dependsOn tasks.named('reobfJar')
 }
 
@@ -165,6 +170,12 @@ tasks.named('jar', Jar).configure {
 publishing {
     publications {
         register('mavenJava', MavenPublication) {
+            // artifact jar, not from(components.java): this jar already contains
+            // coffeelib-api, coffeelib-core and the Configurate backends, so declaring
+            // them as POM dependencies too would put every one of those classes on a
+            // consumer's classpath twice, once bundled and once resolved. A publication
+            // built from an artifact rather than a component carries no dependency
+            // metadata, which is exactly right for a self-contained jar.
             artifact jar
         }
     }

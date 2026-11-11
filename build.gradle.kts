@@ -51,18 +51,31 @@ subprojects {
 }
 
 // JitPack serves whatever a build leaves in ~/.m2, so every module a consumer is told
-// to depend on needs a publication. The Forge and NeoForge modules declare their own
-// (their jar goes through their platform plugin first); these three are plain
-// java-library jars and had none at all, which would have made the README's
-// coffeelib-api/-core/-paper coordinates resolve to nothing even on a green build.
-configure(subprojects.filter {
-    it.name in listOf("coffeelib-api", "coffeelib-core", "coffeelib-platform-paper")
-}) {
+// to depend on needs a publication; coffeelib-api, coffeelib-core and the Paper module
+// had none at all, which would have made three of the README's five coordinates resolve
+// to nothing even on a green build. The Forge and NeoForge modules declare their own.
+//
+// api and core publish from the java component, dependencies and all: they are the jars
+// you compile against, and a consumer has to resolve Configurate from core's metadata.
+configure(subprojects.filter { it.name in listOf("coffeelib-api", "coffeelib-core") }) {
     apply(plugin = "maven-publish")
 
     extensions.configure<PublishingExtension> {
         publications.register<MavenPublication>("mavenJava") {
             from(components["java"])
+        }
+    }
+}
+
+// The Paper jar is self-contained like the other platform jars, so it publishes the
+// artifact alone: a POM listing api, core and Configurate would hand a consumer every
+// one of those classes twice, once bundled and once resolved.
+configure(subprojects.filter { it.name == "coffeelib-platform-paper" }) {
+    apply(plugin = "maven-publish")
+
+    extensions.configure<PublishingExtension> {
+        publications.register<MavenPublication>("mavenJava") {
+            artifact(tasks.named("jar"))
         }
     }
 }

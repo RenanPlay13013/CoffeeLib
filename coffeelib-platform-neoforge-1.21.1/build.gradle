@@ -144,7 +144,13 @@ tasks.named('jar', Jar).configure {
 publishing {
     publications {
         register('mavenJava', MavenPublication) {
-            from components.java
+            // artifact jar, not from(components.java): this jar already contains
+            // coffeelib-api, coffeelib-core and the Configurate backends, so declaring
+            // them as POM dependencies too would put every one of those classes on a
+            // consumer's classpath twice, once bundled and once resolved. A publication
+            // built from an artifact rather than a component carries no dependency
+            // metadata, which is exactly right for a self-contained jar.
+            artifact jar
         }
     }
     repositories {
