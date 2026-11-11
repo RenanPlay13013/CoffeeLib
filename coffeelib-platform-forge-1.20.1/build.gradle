@@ -4,8 +4,10 @@ plugins {
     id 'net.minecraftforge.gradle' version '[6.0,6.2)'
 }
 
-version = mod_version
-group = mod_group_id
+// mod_version/mod_group_id are the defaults; an injected -Pversion/-Pgroup wins, so a
+// JitPack build publishes under the coordinates it serves (see the root build script).
+version = providers.gradleProperty('version').getOrElse(mod_version)
+group = providers.gradleProperty('group').getOrElse(mod_group_id)
 
 base {
     // Not mod_id — that's "coffeelib" on every platform module by design, which
@@ -105,7 +107,7 @@ tasks.named('processResources', ProcessResources).configure {
             minecraft_version: minecraft_version, minecraft_version_range: minecraft_version_range,
             forge_version: forge_version, forge_version_range: forge_version_range,
             loader_version_range: loader_version_range,
-            mod_id: mod_id, mod_name: mod_name, mod_license: mod_license, mod_version: mod_version,
+            mod_id: mod_id, mod_name: mod_name, mod_license: mod_license, mod_version: project.version,
             mod_authors: mod_authors, mod_description: mod_description,
     ]
     inputs.properties replaceProperties

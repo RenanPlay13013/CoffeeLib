@@ -2,9 +2,17 @@ plugins {
     base
 }
 
+// JitPack builds with -Pgroup=com.github.<user> -Pversion=<tag> and then serves the
+// artifacts under exactly those coordinates, so an injected value has to win over the
+// one hardcoded here - otherwise the build succeeds and every consumer still gets a
+// 404. providers.gradleProperty sees only what -P or gradle.properties set, unlike
+// findProperty, which would hand back the project's own default and never be null.
+val injectedGroup = providers.gradleProperty("group")
+val injectedVersion = providers.gradleProperty("version")
+
 allprojects {
-    group = "net.loyalnetwork"
-    version = "3.0-SNAPSHOT"
+    group = injectedGroup.getOrElse("net.loyalnetwork")
+    version = injectedVersion.getOrElse("3.0-SNAPSHOT")
 }
 
 subprojects {
@@ -39,6 +47,23 @@ subprojects {
 
     tasks.withType<Test> {
         useJUnitPlatform()
+    }
+}
+
+// JitPack serves whatever a build leaves in ~/.m2, so every module a consumer is told
+// to depend on needs a publication. The Forge and NeoForge modules declare their own
+// (their jar goes through their platform plugin first); these three are plain
+// java-library jars and had none at all, which would have made the README's
+// coffeelib-api/-core/-paper coordinates resolve to nothing even on a green build.
+configure(subprojects.filter {
+    it.name in listOf("coffeelib-api", "coffeelib-core", "coffeelib-platform-paper")
+}) {
+    apply(plugin = "maven-publish")
+
+    extensions.configure<PublishingExtension> {
+        publications.register<MavenPublication>("mavenJava") {
+            from(components["java"])
+        }
     }
 }
 

@@ -8,3 +8,24 @@ before_install:
    - sdk install java 17.0.12-oracle
    - sdk install java 21-tem
    - sdk use java 21-tem
+
+# Replaces JitPack's own build command for one reason: --no-daemon.
+#
+# JitPack runs `./gradlew tasks --all` before the build, in the same daemon, and
+# ForgeGradle's MCPRepo keeps the Project it was created with. On the second build in
+# that daemon it asks that Project for a toolchain launcher and gets
+#
+#   Could not create an instance of type ...DefaultToolchainSpec
+#   Caused by: java.lang.IllegalStateException: project services has been closed
+#
+# which leaves the mapped Minecraft artifact unbuilt and ends in "Could not find
+# net.minecraftforge:forge:<ver>_mapped_official_<mc>". It only bites on a cold
+# Minecraft cache, where MCPRepo actually has steps to run, which is why every JitPack
+# build failed this way while local builds passed. Reproduced it with a throwaway
+# GRADLE_USER_HOME: the build alone succeeds, the same build after `tasks --all` in the
+# same daemon fails, and with --no-daemon it succeeds again.
+#
+# $GROUP and $VERSION are JitPack's own environment variables, passed on so the
+# artifacts are published under the coordinates it serves.
+install:
+   - ./gradlew --no-daemon clean -Pgroup=$GROUP -Pversion=$VERSION -xtest assemble publishToMavenLocal --console=plain
