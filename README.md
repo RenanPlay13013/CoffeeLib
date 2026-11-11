@@ -86,18 +86,26 @@ repositories {
 
 dependencies {
     // Paper
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-paper:2.0")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-paper:3.0.3")
     // Forge 1.20.1
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-forge-1.20.1:2.0")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-forge-1.20.1:3.0.3")
     // NeoForge 1.21.1
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-neoforge-1.21.1:2.0")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-neoforge-1.21.1:3.0.3")
     // Or just the format-agnostic core (config + DI, no platform backend)
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-core:2.0")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-core:3.0.3")
+    // Or only the interfaces and annotations
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-api:3.0.3")
 }
 ```
 
-> Replace `2.0` with any tagged release. The root project is a container — use
-> the **module** coordinates above with `com.github.<user>.<repo>:<module>:<tag>`.
+> The root project is a container — use the **module** coordinates above with
+> `com.github.<user>.<repo>:<module>:<tag>`.
+>
+> **Start at `3.0.3`.** Every earlier tag, `2.0.x` included, has no artifacts on
+> JitPack: its build failed before producing any, and three of the five modules
+> had no publication to begin with. `3.0.3` is the first tag JitPack serves, and
+> the platform jars it serves are the self-contained ones described under
+> [Building from source](#building-from-source).
 
 ---
 

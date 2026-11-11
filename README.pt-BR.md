@@ -86,19 +86,26 @@ repositories {
 
 dependencies {
     // Paper
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-paper:2.0")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-paper:3.0.3")
     // Forge 1.20.1
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-forge-1.20.1:2.0")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-forge-1.20.1:3.0.3")
     // NeoForge 1.21.1
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-neoforge-1.21.1:2.0")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-neoforge-1.21.1:3.0.3")
     // Ou apenas o core agnóstico de formato (config + DI, sem backend de plataforma)
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-core:2.0")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-core:3.0.3")
+    // Ou só as interfaces e anotações
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-api:3.0.3")
 }
 ```
 
-> Troque `2.0` por qualquer release taggada. O projeto raiz é um container —
-> use as coordenadas de **módulo** acima com
+> O projeto raiz é um container — use as coordenadas de **módulo** acima com
 > `com.github.<usuário>.<repo>:<módulo>:<tag>`.
+>
+> **Comece na `3.0.3`.** Nenhuma tag anterior, incluindo as `2.0.x`, tem
+> artefato no JitPack: o build falhava antes de gerar qualquer coisa, e três dos
+> cinco módulos não tinham publicação nenhuma. A `3.0.3` é a primeira tag que o
+> JitPack serve, e os jars de plataforma que ele entrega são os autocontidos
+> descritos em [Compilando a partir do código-fonte](#compilando-a-partir-do-código-fonte).
 
 ---
 
