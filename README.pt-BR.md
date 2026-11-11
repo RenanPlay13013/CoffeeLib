@@ -394,25 +394,16 @@ continuam sendo assunto do `/forge config` e do `/neoforge config`.
 
 ## Compilando a partir do código-fonte
 
-O `build` raiz depende dos builds dos módulos e copia todos os jars para
-`./dist`:
-
-```bash
-./gradlew build
-ls dist/
-# coffeelib-api-1.0-SNAPSHOT.jar  coffeelib-core-1.0-SNAPSHOT.jar ...
-```
-
 O `build` compila todos os módulos e copia o jar de cada um para `./dist`:
 
 ```bash
 ./gradlew build
 ls dist/
-# coffeelib-forge-1.20.1-1.0-SNAPSHOT.jar      <- instale este (autocontido)
-# coffeelib-neoforge-1.21.1-1.0-SNAPSHOT.jar   <- instale este (autocontido)
-# coffeelib-paper-1.0-SNAPSHOT.jar             <- instale este (autocontido)
-# coffeelib-api-1.0-SNAPSHOT.jar               <- compile contra estes
-# coffeelib-core-1.0-SNAPSHOT.jar
+# coffeelib-forge-1.20.1-3.0-SNAPSHOT.jar      <- instale este (autocontido)
+# coffeelib-neoforge-1.21.1-3.0-SNAPSHOT.jar   <- instale este (autocontido)
+# coffeelib-paper-3.0-SNAPSHOT.jar             <- instale este (autocontido)
+# coffeelib-api-3.0-SNAPSHOT.jar               <- compile contra estes
+# coffeelib-core-3.0-SNAPSHOT.jar
 ```
 
 São dois tipos de jar, para dois usos diferentes.

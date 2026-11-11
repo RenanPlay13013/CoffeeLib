@@ -394,11 +394,11 @@ listed (`server.yml`). Native configs are untouched by all of this — they stay
 ```bash
 ./gradlew build
 ls dist/
-# coffeelib-forge-1.20.1-1.0-SNAPSHOT.jar      <- install this one (self-contained)
-# coffeelib-neoforge-1.21.1-1.0-SNAPSHOT.jar   <- install this one (self-contained)
-# coffeelib-paper-1.0-SNAPSHOT.jar             <- install this one (self-contained)
-# coffeelib-api-1.0-SNAPSHOT.jar               <- compile against these
-# coffeelib-core-1.0-SNAPSHOT.jar
+# coffeelib-forge-1.20.1-3.0-SNAPSHOT.jar      <- install this one (self-contained)
+# coffeelib-neoforge-1.21.1-3.0-SNAPSHOT.jar   <- install this one (self-contained)
+# coffeelib-paper-3.0-SNAPSHOT.jar             <- install this one (self-contained)
+# coffeelib-api-3.0-SNAPSHOT.jar               <- compile against these
+# coffeelib-core-3.0-SNAPSHOT.jar
 ```
 
 Two kinds of jar, for two different jobs.
