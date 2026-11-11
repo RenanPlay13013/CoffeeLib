@@ -44,14 +44,31 @@ subprojects {
 
 val distDir = layout.projectDirectory.dir("dist")
 
+// dist holds two kinds of jar, for two different jobs:
+//
+//  * one per platform, self-contained (its own classes plus coffeelib-api,
+//    coffeelib-core and the Configurate backends) — the file you install into
+//    mods/ or plugins/, with nothing else to copy beside it;
+//  * coffeelib-api and coffeelib-core, the plain library jars — what you compile
+//    against when you want CoffeeLib as a dependency without dragging in a
+//    platform you do not target. Being plain is the point here: the formats come
+//    from Configurate, which a build tool resolves from these jars' own metadata.
 tasks.register<Copy>("assembleDist") {
     group = "distribution"
-    description = "Builds every subproject and copies the resulting jars into ./dist."
+    description = "Builds every module and copies its jar into ./dist (platform jars self-contained)."
 
     dependsOn(subprojects.map { it.tasks.named("jar") })
 
     from(subprojects.map { it.tasks.named("jar") })
     into(distDir)
+
+    // Drop whatever a previous build left here, so a renamed or no longer built jar
+    // cannot linger and be installed by mistake.
+    doFirst {
+        distDir.asFile.listFiles()
+            ?.filter { it.isFile && it.name.startsWith("coffeelib-") && it.name.endsWith(".jar") }
+            ?.forEach { it.delete() }
+    }
 }
 
 // `base` gives the root project its own "build" task; an unqualified

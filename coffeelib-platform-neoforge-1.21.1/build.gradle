@@ -43,13 +43,44 @@ neoForge {
 
     mods {
         "${mod_id}" {
+            // Only this module's own classes. api/core reach a dev run through
+            // additionalRuntimeClasspath below instead: ModDevGradle turns both the mod
+            // sources and that classpath into JPMS modules, so listing api/core in both
+            // places makes two modules export net.loyalnetwork.coffeelib.core.* and the
+            // layer fails to resolve ("Modules coffeelib.core.SNAPSHOT and coffeelib
+            // export package ... to module minecraft").
             sourceSet(sourceSets.main)
         }
     }
 }
 
+
+// CoffeeLib's own jar runs code now — /coffeelib config lives in it — so the classes
+// that code needs have to be inside it. A platform jar is loaded by the game as a mod,
+// not resolved as a Maven module, so nothing brings coffeelib-api/core along: without
+// this, the command dies with a ClassNotFoundException on ConfigReloadRegistry.
+//
+// Bundled from an explicit configuration rather than from runtimeClasspath, which here
+// also holds Minecraft itself.
+configurations {
+    bundled
+}
+
 dependencies {
     api(project(":coffeelib-core"))
+
+    // Minecraft already puts gson on the mod classpath, so shipping configurate's
+    // older copy would only shadow it. configurate-yaml/-hocon need no exclusion:
+    // they carry relocated SnakeYAML and typesafe-config inside themselves.
+    bundled(project(":coffeelib-core")) {
+        exclude group: 'com.google.code.gson'
+    }
+
+    // Configurate is a plain library the mod calls into, and ModDevGradle builds a
+    // minimal run classpath holding the declared mod sources and Minecraft's own
+    // libraries only — this is its hook for "on the run classpath, but not a boot
+    // module", so a managed-format config works in a dev run too.
+    additionalRuntimeClasspath(project(":coffeelib-core"))
 
     testImplementation("org.mockito:mockito-core:5.14.2")
 }
@@ -84,6 +115,29 @@ var generateModMetadata = tasks.register("generateModMetadata", ProcessResources
 }
 sourceSets.main.resources.srcDir generateModMetadata
 neoForge.ideSyncTask generateModMetadata
+
+tasks.named('jar', Jar).configure {
+    // The closure below hides where those files come from, so the dependency on the
+    // sibling modules' own jar tasks is stated outright.
+    dependsOn configurations.bundled
+
+    from({ configurations.bundled.collect { it.isDirectory() ? it : zipTree(it) } }) {
+        exclude 'META-INF/MANIFEST.MF'
+        exclude 'META-INF/*.SF'
+        exclude 'META-INF/*.DSA'
+        exclude 'META-INF/*.RSA'
+        exclude 'META-INF/maven/**'
+        // The multi-release copies are the same classes compiled for a newer JVM; the
+        // root ones are complete on their own, and a stray module-info in a mod jar only
+        // confuses the loader's own module scanning.
+        exclude 'META-INF/versions/**'
+        exclude 'module-info.class'
+    }
+
+    // Two bundled jars can both carry e.g. a LICENSE entry; the classes themselves
+    // are distinct, so first-one-wins is the right call.
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
 
 publishing {
     publications {

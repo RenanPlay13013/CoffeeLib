@@ -1,4 +1,4 @@
-package net.loyalnetwork.coffeelib.paper;
+package net.loyalnetwork.coffeelib.core.config.format;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

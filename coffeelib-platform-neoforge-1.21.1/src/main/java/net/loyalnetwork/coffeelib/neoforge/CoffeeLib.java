@@ -1,7 +1,11 @@
 package net.loyalnetwork.coffeelib.neoforge;
 
-import net.loyalnetwork.coffeelib.api.config.ConfigManager;
+import net.loyalnetwork.coffeelib.api.config.ConfigFormat;
+import net.loyalnetwork.coffeelib.api.config.ReloadableConfigManager;
 import net.neoforged.fml.ModContainer;
+import net.neoforged.fml.loading.FMLPaths;
+
+import java.nio.file.Path;
 
 /** Entry point for the NeoForge platform. */
 public final class CoffeeLib {
@@ -10,15 +14,60 @@ public final class CoffeeLib {
     }
 
     /**
-     * Creates a {@link ConfigManager} bound to {@code container}'s mod.
-     * Call this from the mod's constructor, matching NeoForge's own
-     * convention for {@code ModContainer#registerConfig} — configs
-     * {@link ConfigManager#load loaded} through it register with NeoForge's
-     * config system immediately, but fields only reflect what's on disk
-     * once NeoForge fires {@code ModConfigEvent.Loading} (shortly after
-     * construction, not synchronously during this call).
+     * Creates a {@link ReloadableConfigManager} bound to {@code container}'s
+     * mod. Call this from the mod's constructor, matching NeoForge's own
+     * convention for {@code ModContainer#registerConfig}.
+     * <p>
+     * What {@link ReloadableConfigManager#load} then does depends on the
+     * config class:
+     * <ul>
+     *   <li>{@code @ConfigFile("x")} (i.e. {@link ConfigFormat#NATIVE}) —
+     *       registers with NeoForge's config system immediately, but the
+     *       fields only reflect what is on disk once NeoForge fires
+     *       {@code ModConfigEvent.Loading}, shortly after construction rather
+     *       than synchronously during the call.</li>
+     *   <li>{@code @ConfigFile(value = "x", format = YAML)} and the other
+     *       CoffeeLib-managed formats — the file in {@code config/} is read,
+     *       validated and written back during the call, and the instance you
+     *       get is already populated. Nothing about it is tied to mod
+     *       loading, and it can be reloaded at any time through this same
+     *       manager or {@code /coffeelib config}.</li>
+     * </ul>
      */
-    public static ConfigManager forMod(ModContainer container) {
-        return new NeoForgeConfigManager(container, container.getEventBus());
+    public static ReloadableConfigManager forMod(ModContainer container) {
+        return new NeoForgeConfigManager(
+                container.getModId(), container, container.getEventBus(), CoffeeLib::configDirectory);
+    }
+
+    /**
+     * Creates a manager for CoffeeLib-managed formats only, callable at any
+     * point in a mod's life — not just from its constructor.
+     * <p>
+     * Use it when you want configs that have nothing to do with the
+     * mod-loading lifecycle: loading one reads the file there and then, so a
+     * manager built in a server-start handler, a command, or a reload hook
+     * works exactly the same as one built during construction. Asking it for
+     * a {@link ConfigFormat#NATIVE} config fails with a
+     * {@code ConfigException}, since registering a {@code ModConfig} is only
+     * legal while the mod is being constructed.
+     *
+     * @param modId the mod this manager belongs to — also the key an operator
+     *              types in {@code /coffeelib config reload <mod>}
+     */
+    public static ReloadableConfigManager detached(String modId) {
+        return new NeoForgeConfigManager(modId, null, null, CoffeeLib::configDirectory);
+    }
+
+    /**
+     * NeoForge's {@code config/} directory, the same one a native
+     * {@code ModConfig} writes its TOML into — so a mod's managed files sit
+     * next to the files an operator already expects to find there.
+     * <p>
+     * Passed around as a supplier, not a resolved path: FML only fills these
+     * in once the loader is running, and a mod using native configs
+     * exclusively should never make CoffeeLib ask.
+     */
+    private static Path configDirectory() {
+        return FMLPaths.CONFIGDIR.get();
     }
 }

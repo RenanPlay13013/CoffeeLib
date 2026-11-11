@@ -63,6 +63,18 @@ public final class DefaultConfigManager implements ConfigManager {
         write(config, model.getFields(), resolvePath(model));
     }
 
+    /**
+     * Where {@code type}'s file lives under this manager's base directory,
+     * extension included. Exposed because a config CoffeeLib manages itself
+     * can be watched for changes (see {@code ManagedConfigService}), and a
+     * watcher needs the path without duplicating the naming rule.
+     *
+     * @throws ConfigException if {@code type} is not a {@code @ConfigFile} class
+     */
+    public Path fileOf(Class<?> type) {
+        return resolvePath(ConfigReflector.scan(type));
+    }
+
     private Path resolvePath(ConfigModel model) {
         return baseDirectory.resolve(model.getFileName() + "." + backend.fileExtension());
     }

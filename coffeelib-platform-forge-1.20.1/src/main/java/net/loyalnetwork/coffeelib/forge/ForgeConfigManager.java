@@ -1,277 +1,162 @@
 package net.loyalnetwork.coffeelib.forge;
 
-import net.loyalnetwork.coffeelib.api.config.ConfigManager;
-import net.loyalnetwork.coffeelib.api.config.annotation.Comment;
-import net.loyalnetwork.coffeelib.api.config.annotation.ConfigFile;
-import net.loyalnetwork.coffeelib.api.config.annotation.Ignore;
-import net.loyalnetwork.coffeelib.api.config.annotation.Key;
-import net.loyalnetwork.coffeelib.api.config.annotation.OneOf;
-import net.loyalnetwork.coffeelib.api.config.annotation.Range;
+import net.loyalnetwork.coffeelib.api.config.ConfigFormat;
+import net.loyalnetwork.coffeelib.api.config.ReloadableConfigManager;
 import net.loyalnetwork.coffeelib.api.config.exception.ConfigException;
-import net.minecraftforge.common.ForgeConfigSpec;
+import net.loyalnetwork.coffeelib.core.config.reload.ConfigReloadRegistry;
+import net.loyalnetwork.coffeelib.core.config.reload.ManagedConfigService;
 import net.minecraftforge.eventbus.api.IEventBus;
-import net.minecraftforge.fml.ModLoadingContext;
-import net.minecraftforge.fml.config.ModConfig;
-import net.minecraftforge.fml.event.config.ModConfigEvent;
 
-import java.lang.reflect.Constructor;
-import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
-import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Deque;
+import java.nio.file.Path;
 import java.util.List;
-import java.util.stream.Collectors;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 /**
- * Registers configs with Forge's own config system ({@link ForgeConfigSpec}
- * via {@link ModLoadingContext#registerConfig}) instead of serializing to a
- * file CoffeeLib alone understands — other mods, {@code /forge config}, and
- * Forge's own ConfigTracker all see a real, registered {@code ModConfig}.
+ * What a mod gets from {@link CoffeeLib#forMod}. Routes each config class by
+ * its {@code @ConfigFile(format = ...)}:
+ * <ul>
+ *   <li>{@link ConfigFormat#NATIVE} — {@link ForgeSpecConfigManager}, i.e.
+ *       Forge's own {@code ForgeConfigSpec}. Forge owns the file, the
+ *       validation, and <em>when</em> the fields get populated (on its
+ *       {@code ModConfigEvent}, after mod construction).</li>
+ *   <li>anything else (YAML, JSON, HOCON) —
+ *       {@link ManagedConfigService}, which reads and validates the file
+ *       synchronously inside {@link #load} and never involves the
+ *       mod-loading lifecycle at all.</li>
+ * </ul>
+ * The {@link net.loyalnetwork.coffeelib.api.config.ConfigReloadService} half
+ * of this type covers the managed configs only — they are the ones CoffeeLib
+ * can reload on demand or watch for changes. Native configs stay Forge's to
+ * reload ({@code /forge config}, {@code ModConfigEvent.Reloading}), which is
+ * why {@link #reloadAll()} leaves them alone rather than pretending to.
  * <p>
- * Structurally the same design as the NeoForge platform's manager (they
- * share lineage), with the API's real differences: registration goes
- * through the static {@link ModLoadingContext#get()} rather than a passed
- * {@code ModContainer}, and Forge's {@link IEventBus#addListener} has no
- * {@code (Class, Consumer)} overload — a single listener registered for the
- * {@link ModConfigEvent} supertype catches {@code Loading} and
- * {@code Reloading} both, since Forge's event bus walks each event's
- * {@code ListenerList} parent chain up to its superclasses when dispatching.
+ * The managed side is registered in {@link ConfigReloadRegistry} under the
+ * owning mod id so {@code /coffeelib config} can reach it — see
+ * {@link CoffeeLibCommands}.
  * <p>
- * {@code save()}/{@code reload()} mirror values between the POJO's fields
- * and Forge's {@link ForgeConfigSpec.ConfigValue}s; actual disk I/O and
- * {@code @Range}/{@code @OneOf}-equivalent bounds checking happen inside
- * Forge's own {@code ValueSpec}, which silently resets an out-of-bounds
- * value to its default (with a log warning) instead of throwing
- * {@code ConfigValidationException} the way {@code core} does.
- * <p>
- * Scans the annotated class itself rather than reusing {@code core}'s
- * reflector — {@code core} must stay agnostic of any single platform's
- * config concepts.
+ * The native side is created lazily: obtaining the mod event bus and calling
+ * {@code ModLoadingContext.get()} only works during mod construction, so a
+ * mod that uses managed formats exclusively can build its manager whenever it
+ * likes (see {@link CoffeeLib#detached}).
  */
-final class ForgeConfigManager implements ConfigManager {
+final class ForgeConfigManager implements ReloadableConfigManager {
 
-    private final List<Registration> registrations = new ArrayList<>();
+    private final String modId;
+    private final IEventBus modEventBus;
+    private final Supplier<Path> configDirectory;
 
-    ForgeConfigManager(IEventBus modEventBus) {
-        modEventBus.<ModConfigEvent>addListener(this::onConfigEvent);
+    private ManagedConfigService managed;
+
+    private ForgeSpecConfigManager spec;
+
+    ForgeConfigManager(String modId, IEventBus modEventBus, Supplier<Path> configDirectory) {
+        this.modId = modId;
+        this.modEventBus = modEventBus;
+        this.configDirectory = configDirectory;
+        ConfigReloadRegistry.register(modId, this);
     }
 
     @Override
     public <T> T load(Class<T> type) {
-        ConfigFile configFile = type.getAnnotation(ConfigFile.class);
-        if (configFile == null) {
-            throw new ConfigException("Class " + type.getName() + " is not annotated with @ConfigFile");
-        }
-
-        T instance = instantiate(type);
-        List<Binding> bindings = new ArrayList<>();
-        ForgeConfigSpec.Builder builder = new ForgeConfigSpec.Builder();
-        scanFields(type, instance, builder, bindings, new ArrayDeque<>());
-        ForgeConfigSpec spec = builder.build();
-
-        ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, spec, configFile.value());
-        registrations.add(new Registration(instance, spec, bindings));
-        return instance;
+        return ManagedConfigService.handles(type) ? managed().load(type) : spec().load(type);
     }
 
     @Override
     public void reload(Object config) {
-        sync(findRegistration(config).bindings());
+        ManagedConfigService service = managedOrNull();
+        if (service != null && service.owns(config)) {
+            service.reload(config);
+            return;
+        }
+        spec().reload(config);
     }
 
     @Override
     public void save(Object config) {
-        Registration registration = findRegistration(config);
-        writeBindings(registration.bindings());
-        registration.spec().save();
+        ManagedConfigService service = managedOrNull();
+        if (service != null && service.owns(config)) {
+            service.save(config);
+            return;
+        }
+        spec().save(config);
     }
 
-    private void onConfigEvent(ModConfigEvent event) {
-        for (Registration registration : registrations) {
-            if (event.getConfig().getSpec() == registration.spec()) {
-                sync(registration.bindings());
-                return;
+    @Override
+    public List<String> managedFiles() {
+        ManagedConfigService service = managedOrNull();
+        return service != null ? service.managedFiles() : List.of();
+    }
+
+    @Override
+    public boolean reload(String fileName) {
+        ManagedConfigService service = managedOrNull();
+        return service != null && service.reload(fileName);
+    }
+
+    @Override
+    public int reloadAll() {
+        ManagedConfigService service = managedOrNull();
+        return service != null ? service.reloadAll() : 0;
+    }
+
+    @Override
+    public boolean startHotReload() {
+        ManagedConfigService service = managedOrNull();
+        return service != null && service.startHotReload();
+    }
+
+    @Override
+    public boolean stopHotReload() {
+        ManagedConfigService service = managedOrNull();
+        return service != null && service.stopHotReload();
+    }
+
+    @Override
+    public boolean isHotReloadRunning() {
+        ManagedConfigService service = managedOrNull();
+        return service != null && service.isHotReloadRunning();
+    }
+
+    @Override
+    public void addReloadListener(Consumer<Object> listener) {
+        managed().addReloadListener(listener);
+    }
+
+    /** The mod id this manager belongs to — the key an operator types in {@code /coffeelib config}. */
+    String modId() {
+        return modId;
+    }
+
+    /**
+     * The managed-format side, built on first use. Deferred because resolving
+     * the loader's {@code config/} directory means touching FML's own
+     * statics, which a mod using Forge-native configs exclusively should
+     * never pay for (and which no longer makes this type impossible to build
+     * outside a running game).
+     */
+    private synchronized ManagedConfigService managed() {
+        if (managed == null) {
+            managed = new ManagedConfigService(modId, configDirectory.get());
+        }
+        return managed;
+    }
+
+    /** The managed side if anything has used it yet, {@code null} otherwise — never builds it. */
+    private synchronized ManagedConfigService managedOrNull() {
+        return managed;
+    }
+
+    private synchronized ForgeSpecConfigManager spec() {
+        if (spec == null) {
+            if (modEventBus == null) {
+                throw new ConfigException("This manager was created outside mod construction, "
+                        + "so it can only handle CoffeeLib-managed formats. Give the config class an explicit "
+                        + "@ConfigFile(format = ...), or build the manager with CoffeeLib.forMod() from the "
+                        + "mod constructor to use Forge's native config system.");
             }
+            spec = new ForgeSpecConfigManager(modEventBus);
         }
-    }
-
-    private Registration findRegistration(Object config) {
-        for (Registration registration : registrations) {
-            if (registration.instance() == config) {
-                return registration;
-            }
-        }
-        throw new ConfigException("Not a config instance produced by this manager: " + config.getClass().getName());
-    }
-
-    private void scanFields(Class<?> type, Object instance, ForgeConfigSpec.Builder builder,
-                             List<Binding> bindings, Deque<Class<?>> stack) {
-        if (stack.contains(type)) {
-            throw new ConfigException("Circular nesting detected: "
-                    + stack.stream().map(Class::getSimpleName).collect(Collectors.joining(" -> "))
-                    + " -> " + type.getSimpleName());
-        }
-
-        stack.push(type);
-        try {
-            for (Field field : type.getDeclaredFields()) {
-                int modifiers = field.getModifiers();
-                if (Modifier.isStatic(modifiers) || field.isSynthetic() || field.isAnnotationPresent(Ignore.class)) {
-                    continue;
-                }
-                field.setAccessible(true);
-
-                Key keyAnnotation = field.getAnnotation(Key.class);
-                String key = keyAnnotation != null ? keyAnnotation.value() : field.getName();
-
-                Comment commentAnnotation = field.getAnnotation(Comment.class);
-                if (commentAnnotation != null) {
-                    builder.comment(commentAnnotation.value());
-                }
-
-                Range range = field.getAnnotation(Range.class);
-                OneOf oneOf = field.getAnnotation(OneOf.class);
-                Class<?> fieldType = field.getType();
-
-                if (!isScalar(fieldType)) {
-                    if (range != null || oneOf != null) {
-                        throw new ConfigException("@Range/@OneOf cannot be applied to nested object field '"
-                                + field.getName() + "' in " + type.getName());
-                    }
-                    Object nested = nestedInstance(instance, field);
-                    builder.push(key);
-                    scanFields(fieldType, nested, builder, bindings, stack);
-                    builder.pop();
-                    continue;
-                }
-
-                Object defaultValue = readField(instance, field);
-                ForgeConfigSpec.ConfigValue<?> configValue = defineValue(builder, key, fieldType, defaultValue, range, oneOf);
-                bindings.add(new Binding(instance, field, castValue(configValue)));
-            }
-        } finally {
-            stack.pop();
-        }
-    }
-
-    @SuppressWarnings("unchecked")
-    private ForgeConfigSpec.ConfigValue<?> defineValue(ForgeConfigSpec.Builder builder, String key, Class<?> fieldType,
-                                                         Object defaultValue, Range range, OneOf oneOf) {
-        if (fieldType == String.class) {
-            // Arrays.asList, not List.of — Forge's own correction pass calls .contains(rawValue)
-            // with the *uncorrected* value while validating, which is null for a key missing from
-            // the file; List.of(...).contains(null) throws NPE.
-            return oneOf != null
-                    ? builder.defineInList(key, (String) defaultValue, Arrays.asList(oneOf.value()))
-                    : builder.define(key, (String) defaultValue);
-        }
-        if (fieldType == boolean.class || fieldType == Boolean.class) {
-            return builder.define(key, (Boolean) defaultValue);
-        }
-        if (fieldType.isEnum()) {
-            return builder.defineEnum(key, (Enum) defaultValue);
-        }
-        if (fieldType == int.class || fieldType == Integer.class) {
-            return range != null
-                    ? builder.defineInRange(key, (Integer) defaultValue, (int) range.min(), (int) range.max())
-                    : builder.<Integer>define(key, (Integer) defaultValue);
-        }
-        if (fieldType == long.class || fieldType == Long.class) {
-            return range != null
-                    ? builder.defineInRange(key, (Long) defaultValue, (long) range.min(), (long) range.max())
-                    : builder.<Long>define(key, (Long) defaultValue);
-        }
-        if (fieldType == double.class || fieldType == Double.class) {
-            return range != null
-                    ? builder.defineInRange(key, (Double) defaultValue, range.min(), range.max())
-                    : builder.<Double>define(key, (Double) defaultValue);
-        }
-        if (fieldType == float.class || fieldType == Float.class) {
-            return range != null
-                    ? builder.defineInRange(key, (Float) defaultValue, (float) range.min(), (float) range.max(), Float.class)
-                    : builder.<Float>define(key, (Float) defaultValue);
-        }
-        if (fieldType == short.class || fieldType == Short.class) {
-            return range != null
-                    ? builder.defineInRange(key, (Short) defaultValue, (short) range.min(), (short) range.max(), Short.class)
-                    : builder.<Short>define(key, (Short) defaultValue);
-        }
-        throw new ConfigException("Unsupported field type " + fieldType.getName() + " for key '" + key + "'");
-    }
-
-    private static void sync(List<Binding> bindings) {
-        for (Binding binding : bindings) {
-            try {
-                binding.field().set(binding.owner(), binding.configValue().get());
-            } catch (IllegalAccessException e) {
-                throw new ConfigException("Could not set field '" + binding.field().getName() + "'", e);
-            }
-        }
-    }
-
-    private static void writeBindings(List<Binding> bindings) {
-        for (Binding binding : bindings) {
-            try {
-                binding.configValue().set(binding.field().get(binding.owner()));
-            } catch (IllegalAccessException e) {
-                throw new ConfigException("Could not read field '" + binding.field().getName() + "'", e);
-            }
-        }
-    }
-
-    private static Object readField(Object instance, Field field) {
-        try {
-            return field.get(instance);
-        } catch (IllegalAccessException e) {
-            throw new ConfigException("Could not read field '" + field.getName() + "'", e);
-        }
-    }
-
-    private static Object nestedInstance(Object owner, Field field) {
-        Object current = readField(owner, field);
-        if (current != null) {
-            return current;
-        }
-        Object created = instantiate(field.getType());
-        try {
-            field.set(owner, created);
-        } catch (IllegalAccessException e) {
-            throw new ConfigException("Could not set nested field '" + field.getName() + "'", e);
-        }
-        return created;
-    }
-
-    private static <T> T instantiate(Class<T> type) {
-        try {
-            Constructor<T> constructor = type.getDeclaredConstructor();
-            constructor.setAccessible(true);
-            return constructor.newInstance();
-        } catch (ReflectiveOperationException e) {
-            throw new ConfigException("Config class " + type.getName() + " must expose a no-args constructor", e);
-        }
-    }
-
-    private static boolean isScalar(Class<?> type) {
-        return type == String.class
-                || type == boolean.class || type == Boolean.class
-                || type == int.class || type == Integer.class
-                || type == long.class || type == Long.class
-                || type == double.class || type == Double.class
-                || type == float.class || type == Float.class
-                || type == short.class || type == Short.class
-                || type.isEnum();
-    }
-
-    @SuppressWarnings("unchecked")
-    private static ForgeConfigSpec.ConfigValue<Object> castValue(ForgeConfigSpec.ConfigValue<?> value) {
-        return (ForgeConfigSpec.ConfigValue<Object>) value;
-    }
-
-    private record Binding(Object owner, Field field, ForgeConfigSpec.ConfigValue<Object> configValue) {
-    }
-
-    private record Registration(Object instance, ForgeConfigSpec spec, List<Binding> bindings) {
+        return spec;
     }
 }

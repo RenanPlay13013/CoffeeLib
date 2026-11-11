@@ -30,9 +30,18 @@ shared between owners in the same JVM.
   scalars or of nested POJOs, with cycle detection.
 - **Small, explicit DI container** — `@Provide` / `@Receive` wiring by type,
   with named providers and singletons.
-- **Real platform integration** — Paper uses Configurate/SnakeYAML; Forge and
-  NeoForge plug straight into their native config systems so `/forge config`
-  and the ConfigTracker see the real thing.
+- **Real platform integration** — Forge and NeoForge plug straight into their
+  native config systems so `/forge config` and the ConfigTracker see the real
+  thing.
+- **Pick your format per config** — `@ConfigFile(format = YAML | JSON | HOCON)`
+  works on every platform, Forge-like ones included. A config in one of these
+  is CoffeeLib's from end to end: read, validated and written by `core`.
+- **No mod-loading lifecycle for managed formats** — a managed config is read
+  during `load(...)` and the instance comes back populated, instead of waiting
+  for the loader's `ModConfigEvent`.
+- **Manual reload and hot reload** — `/coffeelib config reload` applies an
+  operator's edit immediately, and `/coffeelib config hotreload start|stop`
+  toggles a file watcher that does it on every save.
 
 ---
 
@@ -98,12 +107,62 @@ dependencies {
 
 | Annotation       | Where     | Purpose                                                              |
 | ---------------- | --------- | -------------------------------------                                |
-| `@ConfigFile`    | type      | File name (without extension) for the config.                        |
+| `@ConfigFile`    | type      | File name (without extension), and optionally the `format`.          |
 | `@Key`           | field     | Override the key written to the file (default: field name).          |
 | `@Comment`       | field     | Comment/s written above the key in the generated file.               |
 | `@Ignore`        | field     | Exclude the field from load/save entirely.                           |
 | `@Range(min,max)`| field     | Numeric bounds, validated on load/reload.                            |
 | `@OneOf({...})`  | field     | Restrict a String field to a fixed set, with suggestions.            |
+
+### Config formats
+
+`@ConfigFile` takes a `format`, defaulting to `ConfigFormat.NATIVE`:
+
+| Format   | File    | Who owns the file                                               |
+| -------- | ------- | --------------------------------------------------------------- |
+| `NATIVE` | varies  | The platform. On Paper that means YAML (so, CoffeeLib); on Forge/NeoForge it is the loader's own `ForgeConfigSpec`/`ModConfigSpec` TOML. |
+| `YAML`   | `.yml`  | CoffeeLib (Configurate/SnakeYAML). Comments preserved.          |
+| `JSON`   | `.json` | CoffeeLib (Configurate/Gson). Comments dropped — JSON has none.  |
+| `HOCON`  | `.conf` | CoffeeLib (Configurate/HOCON). Comments preserved.              |
+
+```java
+@ConfigFile(value = "server", format = ConfigFormat.YAML)   // -> config/server.yml on Forge
+public final class ServerConfig { /* ... */ }
+```
+
+Everything but `NATIVE` is a **managed** config, and on Forge and NeoForge that
+choice changes three things:
+
+1. **Loading is synchronous.** `load(...)` reads the file (creating it with
+   defaults on first run) and hands back a populated instance. Nothing waits on
+   `ModConfigEvent`, so the values are usable in the same constructor.
+2. **Validation is CoffeeLib's.** `@Range`/`@OneOf` throw
+   `ConfigValidationException` instead of the loader silently resetting an
+   out-of-range value to its default.
+3. **Reloading is explicit** — see below.
+
+### Reloading a managed config
+
+Every platform entry point returns a `ReloadableConfigManager`
+(`ConfigManager` + `ConfigReloadService`), covering the managed configs that
+manager loaded:
+
+```java
+ReloadableConfigManager configs = CoffeeLib.forMod();
+ServerConfig cfg = configs.load(ServerConfig.class);          // format = YAML
+
+configs.addReloadListener(config -> reopenConnection());      // react to new values
+configs.managedFiles();        // ["server.yml"]
+configs.reload("server.yml");  // one file, now
+configs.reloadAll();           // returns how many reloaded cleanly
+configs.startHotReload();      // watch the files, reload on change
+configs.stopHotReload();
+```
+
+Hot-reload callbacks run on the watcher thread, not the server thread —
+schedule onto the platform's thread yourself if what you do needs it. A file
+that fails to parse or validate leaves the previous values in memory and logs
+why, rather than killing the watcher or half-applying an edit.
 
 ### Basic example
 
@@ -245,9 +304,12 @@ public void onEnable() {
 }
 ```
 
-The Paper backend uses **Configurate YAML** (`configurate-yaml`) for
-serializing, with two-space block style and comments re-injected from
-`@Comment`.
+Paper has no config system of its own to defer to, so every config here is a
+managed one: `NATIVE` resolves to **Configurate YAML** (two-space block style,
+comments re-injected from `@Comment`), and a class can opt into JSON or HOCON
+per `@ConfigFile(format = ...)`. Manual reload and hot reload are available on
+the returned manager — Paper plugins ship their own `/myplugin reload`, so this
+module registers no command of its own.
 
 ### Forge 1.20.1
 
@@ -260,11 +322,29 @@ public class MyMod {
 }
 ```
 
-Forge uses its own `ForgeConfigSpec`, meaning every loaded config is a real,
-registered `ModConfig` — visible to `/forge config` and Forge's `ConfigTracker`.
-Since Forge owns disk I/O and validation, its bounds checking resets
-out-of-range values to the default (with a log warning) rather than throwing
-CoffeeLib's `ConfigValidationException`.
+A `NATIVE` config uses Forge's own `ForgeConfigSpec`, so it is a real,
+registered `ModConfig` — visible to `/forge config` and Forge's
+`ConfigTracker`. Since Forge owns disk I/O and validation there, its bounds
+checking resets out-of-range values to the default (with a log warning) rather
+than throwing CoffeeLib's `ConfigValidationException`.
+
+A config in any other format goes to `config/<name>.<ext>` and is CoffeeLib's:
+
+```java
+public class MyMod {
+    public MyMod(FMLJavaModLoadingContext ctx) {
+        ReloadableConfigManager configs = CoffeeLib.forMod();
+        MyConfig cfg = configs.load(MyConfig.class);   // format = YAML -> populated right here
+        configs.startHotReload();                      // optional: watch it from the start
+    }
+}
+```
+
+`CoffeeLib.forMod()` must still be called from the mod constructor, because
+that is the only place Forge lets anyone register a `ModConfig`. If you only
+use managed formats, `CoffeeLib.detached("mymod")` works anywhere — a
+server-start handler, a command, a reload hook — and fails with a clear
+`ConfigException` if handed a `NATIVE` class.
 
 ### NeoForge 1.21.1
 
@@ -277,23 +357,95 @@ public class MyMod {
 }
 ```
 
-Same as Forge but against NeoForge's `ModConfigSpec`/`ModConfigEvent`.
+Same as Forge but against NeoForge's `ModConfigSpec`/`ModConfigEvent`, and
+`CoffeeLib.detached("mymod")` is here too.
 
-> On Forge/NeoForge, fields only reflect what's on disk once the loader fires
-> its `ModConfigEvent` **after** construction — not synchronously during the
-> `load(...)` call.
+> This applies to `NATIVE` configs only: their fields reflect what is on disk
+> once the loader fires its `ModConfigEvent` **after** construction, not
+> synchronously during the `load(...)` call. A managed config
+> (`format = YAML | JSON | HOCON`) is read during the call and never involves
+> the loader.
+
+### `/coffeelib config` (Forge and NeoForge)
+
+The CoffeeLib jar registers one command, the operator side of managed configs —
+the loader knows nothing about those files, so without it an edit would need a
+server restart. Requires permission level 2.
+
+```
+/coffeelib config list                      what is managed, and what is being watched
+/coffeelib config reload                    every managed file of every mod
+/coffeelib config reload <mod> [<file>]     one mod, or one file of it
+/coffeelib config hotreload status
+/coffeelib config hotreload start [<mod>]   start the file watcher
+/coffeelib config hotreload stop  [<mod>]   stop it
+```
+
+`<mod>` is the mod id the manager was created with, and files are named as
+listed (`server.yml`). Native configs are untouched by all of this — they stay
+`/forge config`'s and `/neoforge config`'s business.
 
 ---
 
 ## Building from source
 
-The root `build` depends on module builds and copies every jar into `./dist`:
+`build` builds every module and copies its jar into `./dist`:
 
 ```bash
 ./gradlew build
 ls dist/
-# coffeelib-api-1.0-SNAPSHOT.jar  coffeelib-core-1.0-SNAPSHOT.jar ...
+# coffeelib-forge-1.20.1-1.0-SNAPSHOT.jar      <- install this one (self-contained)
+# coffeelib-neoforge-1.21.1-1.0-SNAPSHOT.jar   <- install this one (self-contained)
+# coffeelib-paper-1.0-SNAPSHOT.jar             <- install this one (self-contained)
+# coffeelib-api-1.0-SNAPSHOT.jar               <- compile against these
+# coffeelib-core-1.0-SNAPSHOT.jar
 ```
+
+Two kinds of jar, for two different jobs.
+
+**The platform jars are self-contained**: each bundles `coffeelib-api`,
+`coffeelib-core` and the Configurate backends (`configurate-yaml`,
+`configurate-gson`, `configurate-hocon`), because the game loads it as a
+mod/plugin rather than resolving its Maven dependencies — `/coffeelib config`
+runs inside that jar and needs them. `gson` is left out: the game already
+provides it. One file into `mods/` or `plugins/` and nothing to copy beside it.
+A mod or plugin that shades CoffeeLib instead of relying on the installed jar
+needs to shade the same set.
+
+**`coffeelib-api` and `coffeelib-core` are the plain library jars**, for
+depending on CoffeeLib at build time without pulling in a platform you do not
+target — `core` for the config/DI implementation, `api` alone if you only need
+the interfaces and annotations. Being plain is the point: they carry no copy of
+Configurate, so a build tool resolves the formats from their own metadata (see
+the JitPack coordinates above) and nothing is duplicated at runtime. They are
+not meant to be dropped into `mods/`.
+
+The Forge jar is taken after `reobfJar`, which rewrites it to the SRG names a
+real Forge runtime patches — a jar copied before that step runs only inside a
+dev run.
+
+### Dev runs
+
+`runClient`/`runServer` load the mod from `build/classes`, not from that jar, so
+the bundling above does nothing for them and each loader needs its own wiring:
+
+* **Forge** — `coffeelib-core` goes into ForgeGradle's `minecraftLibrary`, which
+  lands on the Minecraft runtime classpath (the one that also carries gson and
+  guava). A project's plain runtime dependencies sit on a classpath the mod's own
+  class loader cannot see — that was the tab-complete crash on
+  `ConfigReloadRegistry`.
+* **NeoForge** — the same thing through ModDevGradle's
+  `additionalRuntimeClasspath`.
+
+Both exclude `gson`: Minecraft puts its own copy on the module path, and a second
+one makes the run fail to resolve. Both are also classpath-only on purpose —
+adding the classes as mod sources *as well* makes two JPMS modules export the
+same package, which fails the same way.
+
+Both loaders launch from generated argument files. After changing any of this,
+start the run through Gradle (`./gradlew :coffeelib-platform-neoforge-1.21.1:runClient`)
+or re-sync Gradle in the IDE, otherwise the run reuses the previously generated
+classpath and you debug a configuration that is no longer on disk.
 
 Toolchains are auto-provisioned by the foojay resolver against a configured JDK.
 Check `gradle.properties` / each module's `gradle.properties` for version pinning.

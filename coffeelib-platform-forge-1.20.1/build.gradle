@@ -33,6 +33,10 @@ minecraft {
 
             mods {
                 "${mod_id}" {
+                    // Only this module's own classes. api/core reach a dev run through
+                    // minecraftLibrary instead: listing them in both places makes two JPMS
+                    // modules export the same package and the run fails to resolve
+                    // ("Modules coffeelib and coffeelib.api.SNAPSHOT export package ...").
                     source sourceSets.main
                 }
             }
@@ -46,8 +50,41 @@ minecraft {
     }
 }
 
+
+// CoffeeLib's own jar runs code now — /coffeelib config lives in it — so the classes
+// that code needs have to be inside it. A platform jar is loaded by the game as a mod,
+// not resolved as a Maven module, so nothing brings coffeelib-api/core along: without
+// this, the command dies with a ClassNotFoundException on ConfigReloadRegistry.
+//
+// Bundled from an explicit configuration rather than from runtimeClasspath, which here
+// also holds Minecraft itself.
+configurations {
+    bundled
+}
+
 dependencies {
     api(project(":coffeelib-core"))
+
+    // Minecraft already puts gson on the mod classpath, so shipping configurate's
+    // older copy would only shadow it. configurate-yaml/-hocon need no exclusion:
+    // they carry relocated SnakeYAML and typesafe-config inside themselves.
+    bundled(project(":coffeelib-core")) {
+        exclude group: 'com.google.code.gson'
+    }
+
+    // Dev runs: the mod is loaded from build/classes, so the bundling above does nothing
+    // for them. ForgeGradle leaves a project's plain runtime dependencies on a classpath
+    // the mod's own class loader cannot see — that was the tab-complete crash on
+    // ConfigReloadRegistry — while everything in this configuration lands on the Minecraft
+    // runtime classpath the loader does expose, the same place gson and guava come from.
+    // NeoForge's equivalent is additionalRuntimeClasspath.
+    // gson excluded for the same reason as in the bundle, and here it is not optional:
+    // Minecraft puts its own gson on the module path, and a second copy makes the run
+    // fail to resolve ("Modules gson and com.google.gson export package
+    // com.google.gson.annotations").
+    minecraftLibrary(project(":coffeelib-core")) {
+        exclude group: 'com.google.code.gson'
+    }
 
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
 
@@ -78,7 +115,35 @@ tasks.named('processResources', ProcessResources).configure {
     }
 }
 
+// reobfJar rewrites the jar in place after jar builds it, remapping to the SRG names a
+// real Forge runtime patches. Without this, ./gradlew build races it and dist ends up
+// with the un-remapped jar, which would then fail outside a dev run.
+rootProject.tasks.named('assembleDist').configure {
+    dependsOn tasks.named('reobfJar')
+}
+
 tasks.named('jar', Jar).configure {
+    // The closure below hides where those files come from, so the dependency on the
+    // sibling modules' own jar tasks is stated outright.
+    dependsOn configurations.bundled
+
+    from({ configurations.bundled.collect { it.isDirectory() ? it : zipTree(it) } }) {
+        exclude 'META-INF/MANIFEST.MF'
+        exclude 'META-INF/*.SF'
+        exclude 'META-INF/*.DSA'
+        exclude 'META-INF/*.RSA'
+        exclude 'META-INF/maven/**'
+        // The multi-release copies are the same classes compiled for a newer JVM; the
+        // root ones are complete on their own, and a stray module-info in a mod jar only
+        // confuses the loader's own module scanning.
+        exclude 'META-INF/versions/**'
+        exclude 'module-info.class'
+    }
+
+    // Two bundled jars can both carry e.g. a LICENSE entry; the classes themselves
+    // are distinct, so first-one-wins is the right call.
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
     manifest {
         attributes([
                 'Specification-Title'     : mod_id,

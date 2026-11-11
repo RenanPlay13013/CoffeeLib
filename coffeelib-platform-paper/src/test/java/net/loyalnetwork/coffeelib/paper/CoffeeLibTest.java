@@ -20,8 +20,9 @@ import static org.mockito.Mockito.when;
 /**
  * Exercises the real entry point a plugin author would call —
  * {@link CoffeeLib#forPlugin} — against a mocked {@link JavaPlugin}, with
- * real reflection, real nested-object handling, and real file I/O via
- * {@link YamlConfigBackend}. No fakes below {@code JavaPlugin} itself.
+ * real reflection, real nested-object handling, and real file I/O through
+ * {@code core}'s shared YAML backend. No fakes below {@code JavaPlugin}
+ * itself.
  */
 class CoffeeLibTest {
 
@@ -51,6 +52,7 @@ class CoffeeLibTest {
     @Test
     void loadsDeeplyNestedConfigThroughRealPaperEntryPoint(@TempDir Path tempDir) throws IOException {
         JavaPlugin plugin = mock(JavaPlugin.class);
+        when(plugin.getName()).thenReturn("TestPlugin");
         when(plugin.getDataFolder()).thenReturn(tempDir.toFile());
 
         ConfigManager manager = CoffeeLib.forPlugin(plugin);
@@ -76,6 +78,7 @@ class CoffeeLibTest {
     @Test
     void reloadPicksUpEditsMadeDirectlyToTheFile(@TempDir Path tempDir) throws IOException {
         JavaPlugin plugin = mock(JavaPlugin.class);
+        when(plugin.getName()).thenReturn("TestPlugin");
         when(plugin.getDataFolder()).thenReturn(tempDir.toFile());
 
         ConfigManager manager = CoffeeLib.forPlugin(plugin);
