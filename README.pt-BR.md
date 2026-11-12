@@ -89,23 +89,25 @@ repositories {
 
 dependencies {
     // Paper
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-paper:3.1")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-paper:3.2")
     // Forge 1.20.1
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-forge-1.20.1:3.1")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-forge-1.20.1:3.2")
     // NeoForge 1.21.1
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-neoforge-1.21.1:3.1")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-neoforge-1.21.1:3.2")
     // Ou apenas o core agnóstico de formato (config + DI, sem backend de plataforma)
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-core:3.1")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-core:3.2")
     // Ou só as interfaces e anotações
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-api:3.1")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-api:3.2")
 }
 ```
 
 > O projeto raiz é um container — use as coordenadas de **módulo** acima com
 > `com.github.<usuário>.<repo>:<módulo>:<tag>`.
 >
-> **Comece na `3.1`**, a primeira release com o event bus. A `3.0.4` é a mesma
-> lib sem ele; a `3.0.3` também resolve, mas os POMs de plataforma dela declaram
+> **Comece na `3.2`.** A `3.1` é a mesma lib antes de as configs poderem ficar
+> fora do `config/` e antes de um config `NATIVE` no Forge/NeoForge ganhar a
+> extensão `.toml` — ao subir dela esse arquivo é renomeado, e os valores do
+> antigo sem extensão não vão junto. A `3.0.4` é a `3.1` sem o event bus; a `3.0.3` também resolve, mas os POMs de plataforma dela declaram
 > `coffeelib-api`, `coffeelib-core` e o Configurate como dependências mesmo com
 > o jar já embutindo tudo, então você recebe essas classes duas vezes. Qualquer
 > tag anterior a essas, incluindo as `2.0.x`, não tem artefato nenhum: o build
@@ -544,11 +546,11 @@ O `build` compila todos os módulos e copia o jar de cada um para `./dist`:
 ```bash
 ./gradlew build
 ls dist/
-# coffeelib-forge-1.20.1-3.1-SNAPSHOT.jar      <- instale este (autocontido)
-# coffeelib-neoforge-1.21.1-3.1-SNAPSHOT.jar   <- instale este (autocontido)
-# coffeelib-paper-3.1-SNAPSHOT.jar             <- instale este (autocontido)
-# coffeelib-api-3.1-SNAPSHOT.jar               <- compile contra estes
-# coffeelib-core-3.1-SNAPSHOT.jar
+# coffeelib-forge-1.20.1-3.2-SNAPSHOT.jar      <- instale este (autocontido)
+# coffeelib-neoforge-1.21.1-3.2-SNAPSHOT.jar   <- instale este (autocontido)
+# coffeelib-paper-3.2-SNAPSHOT.jar             <- instale este (autocontido)
+# coffeelib-api-3.2-SNAPSHOT.jar               <- compile contra estes
+# coffeelib-core-3.2-SNAPSHOT.jar
 ```
 
 São dois tipos de jar, para dois usos diferentes.
