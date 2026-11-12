@@ -89,25 +89,26 @@ repositories {
 
 dependencies {
     // Paper
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-paper:3.0.4")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-paper:3.1")
     // Forge 1.20.1
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-forge-1.20.1:3.0.4")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-forge-1.20.1:3.1")
     // NeoForge 1.21.1
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-neoforge-1.21.1:3.0.4")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-neoforge-1.21.1:3.1")
     // Or just the format-agnostic core (config + DI, no platform backend)
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-core:3.0.4")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-core:3.1")
     // Or only the interfaces and annotations
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-api:3.0.4")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-api:3.1")
 }
 ```
 
 > The root project is a container — use the **module** coordinates above with
 > `com.github.<user>.<repo>:<module>:<tag>`.
 >
-> **Start at `3.0.4`.** `3.0.3` resolves too, but its platform POMs declare
+> **Start at `3.1`**, the first release with the event bus. `3.0.4` is the same
+> library without it; `3.0.3` resolves too, but its platform POMs declare
 > `coffeelib-api`, `coffeelib-core` and Configurate as dependencies although the
 > jar already bundles them, so you get those classes twice. Every tag before
-> that, `2.0.x` included, has no artifacts at all: the build failed before
+> those, `2.0.x` included, has no artifacts at all: the build failed before
 > producing any, and three of the five modules had no publication to begin with.
 > The platform jars JitPack serves are the self-contained ones described under
 > [Building from source](#building-from-source).
@@ -497,11 +498,11 @@ listed (`server.yml`). Native configs are untouched by all of this — they stay
 ```bash
 ./gradlew build
 ls dist/
-# coffeelib-forge-1.20.1-3.0-SNAPSHOT.jar      <- install this one (self-contained)
-# coffeelib-neoforge-1.21.1-3.0-SNAPSHOT.jar   <- install this one (self-contained)
-# coffeelib-paper-3.0-SNAPSHOT.jar             <- install this one (self-contained)
-# coffeelib-api-3.0-SNAPSHOT.jar               <- compile against these
-# coffeelib-core-3.0-SNAPSHOT.jar
+# coffeelib-forge-1.20.1-3.1-SNAPSHOT.jar      <- install this one (self-contained)
+# coffeelib-neoforge-1.21.1-3.1-SNAPSHOT.jar   <- install this one (self-contained)
+# coffeelib-paper-3.1-SNAPSHOT.jar             <- install this one (self-contained)
+# coffeelib-api-3.1-SNAPSHOT.jar               <- compile against these
+# coffeelib-core-3.1-SNAPSHOT.jar
 ```
 
 Two kinds of jar, for two different jobs.
