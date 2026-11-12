@@ -2,6 +2,8 @@ package net.loyalnetwork.coffeelib.forge;
 
 import net.loyalnetwork.coffeelib.api.config.ConfigFormat;
 import net.loyalnetwork.coffeelib.api.config.ReloadableConfigManager;
+import net.loyalnetwork.coffeelib.api.event.EventBus;
+import net.loyalnetwork.coffeelib.core.event.SharedEventBus;
 import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import net.minecraftforge.fml.loading.FMLPaths;
@@ -60,6 +62,36 @@ public final class CoffeeLib {
      */
     public static ReloadableConfigManager detached(String modId) {
         return new ForgeConfigManager(modId, null, CoffeeLib::configDirectory);
+    }
+
+    /**
+     * The CoffeeLib event bus, as a handle bound to the calling mod. Call it
+     * from the mod's constructor, where Forge has the active namespace to take
+     * the owner id from; {@link #eventBus(String)} works anywhere.
+     * <p>
+     * This is CoffeeLib's own bus, not Forge's: handlers registered here see
+     * events posted by any other mod using the library, on any platform, with
+     * no Forge event classes involved. Forge's own {@code IEventBus} is still
+     * the right place for Minecraft's events.
+     * <p>
+     * Cross-mod delivery needs every mod to load the same CoffeeLib classes,
+     * which is what installing this jar as a mod gives you. A mod that shades
+     * CoffeeLib into itself gets a private bus instead - see
+     * {@link net.loyalnetwork.coffeelib.core.event.SharedEventBus}.
+     */
+    public static EventBus eventBus() {
+        return eventBus(ModLoadingContext.get().getActiveNamespace());
+    }
+
+    /**
+     * The event bus as a handle bound to {@code modId}, callable at any point
+     * in a mod's life.
+     *
+     * @param modId the mod this handle belongs to - the id its handlers are
+     *              recorded against, and the one {@code unregisterAll()} clears
+     */
+    public static EventBus eventBus(String modId) {
+        return SharedEventBus.forOwner(modId);
     }
 
     /**

@@ -33,6 +33,9 @@ compartilhado entre donos na mesma JVM.
   de POJOs aninhados, com detecção de ciclos.
 - **Container DI pequeno e explícito** — fiação `@Provide` / `@Receive` por
   tipo, com providers nomeados e singletons.
+- **Event bus próprio** — um canal compartilhado por todos os mods e plugins da
+  lib, com prioridades, cancelamento e handlers `@Subscribe`, para dois donos
+  conversarem por tipos Java simples em vez de eventos do Forge ou do Bukkit.
 - **Integração real com plataformas** — Forge e NeoForge se integram com seus
   sistemas nativos de config, então `/forge config` e o ConfigTracker enxergam
   de verdade.
@@ -298,6 +301,99 @@ Regras:
   *antes* de os receivers que os consomem serem fiados. Caso contrário, a
   fiação falha de imediato.
 * Uma `wire()` que falha não aplica campos pela metade e não cacheia a falha.
+
+---
+
+## Event bus
+
+O CoffeeLib tem o próprio event bus, para conversar **entre** mods e plugins
+sem passar pelo `IEventBus` do Forge nem pelo `PluginManager` do Bukkit. Um bus
+de plataforma amarra as duas pontas de um recurso àquela plataforma: a mesma
+coisa precisa de um evento do Forge, um do NeoForge e um do Bukkit, cada um
+registrado de um jeito, e um evento que um mod define fica estranho de outro
+escutar. Aqui as duas pontas combinam uma classe Java simples e mais nada.
+
+Qualquer tipo serve como evento — um record geralmente basta:
+
+```java
+public record OrderPlaced(String item, int quantity) {}
+```
+
+Pegue um handle ligado ao seu mod ou plugin e então publique ou escute:
+
+```java
+EventBus bus = CoffeeLib.eventBus();           // Forge, do construtor do mod
+EventBus bus = CoffeeLib.eventBus(container);  // NeoForge
+EventBus bus = CoffeeLib.eventBus(this);       // Paper, do seu JavaPlugin
+
+// lambda, quando você só quer o handle de volta
+EventSubscription sub = bus.subscribe(OrderPlaced.class, event -> log(event.item()));
+sub.unsubscribe();
+
+bus.post(new OrderPlaced("coffee", 2));
+```
+
+Ou agrupe handlers numa classe, que é onde o `@Subscribe` se paga:
+
+```java
+public final class OrderListener {
+
+    @Subscribe                                       // padrão é NORMAL
+    private void onOrder(OrderPlaced event) { ... }  // private funciona
+
+    @Subscribe(priority = EventPriority.MONITOR)     // roda por último, só observa
+    void audit(OrderPlaced event) { ... }
+}
+
+bus.register(new OrderListener());
+```
+
+Um handler dispara para o tipo do parâmetro **e todos os subtipos**, então
+assinar um supertipo comum ou uma interface funciona como se espera. Os
+handlers rodam na ordem de `EventPriority` — `FIRST`, `EARLY`, `NORMAL`,
+`LATE`, `LAST`, `MONITOR` — e, dentro de uma mesma prioridade, na ordem de
+registro.
+
+### Cancelamento
+
+Um evento que implementa `Cancellable` pode ser cancelado por um handler, e o
+`post` devolve o evento para a decisão ficar legível na chamada:
+
+```java
+if (!bus.post(new OrderPlaced("coffee", 2)).isCancelled()) {
+    fazerPedido();
+}
+```
+
+Respeitar o cancelamento é trabalho de quem publicou — o bus nunca age por
+conta. O que ele faz é parar de entregar um evento cancelado aos handlers que
+não pediram por isso; quem quiser recebê-los mesmo assim declara
+`@Subscribe(receiveCancelled = true)`, o que serve para log e métricas, não
+para agir sobre o evento.
+
+### Threads, falhas e limpeza
+
+* Os handlers rodam **na thread que publicou**. Não existe fila nem troca de
+  thread, então um handler lento bloqueia quem publicou, e qualquer coisa que
+  toque o estado do servidor precisa ir para a thread certa do jeito que
+  aquela plataforma espera.
+* Um handler que lança exceção é registrado no log em nome do dono dele e
+  pulado; os handlers seguintes rodam normalmente, e nada disso vaza para quem
+  publicou. O bug de um mod não quebra os handlers de outro.
+* `bus.unregisterAll()` remove tudo que o seu dono registrou. Vale chamar
+  quando o seu dono vai embora: handlers seguram seus objetos e, por eles, seu
+  class loader. No Paper isso é automático — o plugin do CoffeeLib limpa os
+  handlers de um plugin quando ele é desabilitado, então um `/reload` não
+  deixa a cópia antiga das suas classes respondendo eventos.
+
+> **Uma cópia do CoffeeLib, ou não existe canal compartilhado.** A entrega
+> entre donos só funciona enquanto todos carregam as mesmas classes do
+> CoffeeLib. Instale-o como mod próprio no Forge/NeoForge e como plugin próprio
+> no Paper — onde o seu plugin também precisa declarar o CoffeeLib em `depend`
+> ou `softdepend` no `plugin.yml` para resolver essas classes a partir dele. Um
+> mod ou plugin que faz shade do CoffeeLib dentro de si fica com um bus
+> privado, o que é ótimo se for intencional e silencioso se não for.
+> `new DefaultEventBus("meuid")` é a forma honesta de pedir um privado.
 
 ---
 

@@ -30,6 +30,9 @@ shared between owners in the same JVM.
   scalars or of nested POJOs, with cycle detection.
 - **Small, explicit DI container** — `@Provide` / `@Receive` wiring by type,
   with named providers and singletons.
+- **An event bus of its own** — one channel shared by every mod and plugin on
+  the library, with priorities, cancellation and `@Subscribe` handlers, so two
+  owners talk through plain Java types instead of Forge or Bukkit events.
 - **Real platform integration** — Forge and NeoForge plug straight into their
   native config systems so `/forge config` and the ConfigTracker see the real
   thing.
@@ -295,6 +298,96 @@ Rules:
 * No automatic dependency graph — providers must be registered *before* the
   receivers that consume them are wired. Wiring fails immediately otherwise.
 * A failed `wire()` does not half-apply fields and does not cache the failure.
+
+---
+
+## Event bus
+
+CoffeeLib has its own event bus, for talking **between** mods and plugins
+without going through Forge's `IEventBus` or Bukkit's `PluginManager`. A
+platform bus ties both ends of a feature to that platform: the same thing needs
+a Forge event, a NeoForge event and a Bukkit event, each registered its own
+way, and an event one mod defines is awkward for another to listen to. Here,
+both ends agree on a plain Java class and nothing else.
+
+Any type can be an event — a record is usually enough:
+
+```java
+public record OrderPlaced(String item, int quantity) {}
+```
+
+Get a handle bound to your own mod or plugin, then post or listen:
+
+```java
+EventBus bus = CoffeeLib.eventBus();           // Forge, from the mod constructor
+EventBus bus = CoffeeLib.eventBus(container);  // NeoForge
+EventBus bus = CoffeeLib.eventBus(this);       // Paper, from your JavaPlugin
+
+// lambda, when you want the handle back and nothing else
+EventSubscription sub = bus.subscribe(OrderPlaced.class, event -> log(event.item()));
+sub.unsubscribe();
+
+bus.post(new OrderPlaced("coffee", 2));
+```
+
+Or group handlers in a class, which is where `@Subscribe` earns its keep:
+
+```java
+public final class OrderListener {
+
+    @Subscribe                                       // defaults to NORMAL
+    private void onOrder(OrderPlaced event) { ... }  // private is fine
+
+    @Subscribe(priority = EventPriority.MONITOR)     // runs last, observe only
+    void audit(OrderPlaced event) { ... }
+}
+
+bus.register(new OrderListener());
+```
+
+A handler fires for its parameter's type **and every subtype**, so subscribing
+to a common supertype or interface works the way you would expect. Handlers run
+in `EventPriority` order — `FIRST`, `EARLY`, `NORMAL`, `LATE`, `LAST`,
+`MONITOR` — and in registration order within one priority.
+
+### Cancelling
+
+An event that implements `Cancellable` can be called off by a handler, and
+`post` hands the event back so the decision reads at the call site:
+
+```java
+if (!bus.post(new OrderPlaced("coffee", 2)).isCancelled()) {
+    placeOrder();
+}
+```
+
+Honoring the cancellation is the poster's job — the bus never acts on it
+itself. What it does do is stop delivering a cancelled event to handlers that
+did not ask for it; a handler that wants them anyway says
+`@Subscribe(receiveCancelled = true)`, which is for logging and metrics rather
+than for acting on the event.
+
+### Threads, failures and cleanup
+
+* Handlers run **on the thread that posted**. There is no queue and no thread
+  hand-off, so a slow handler blocks the poster, and anything touching server
+  state has to get itself onto the right thread the way its platform expects.
+* A handler that throws is logged against its owner and skipped; the handlers
+  after it still run, and nothing surfaces in whoever posted. One mod's bug
+  cannot break another's handlers.
+* `bus.unregisterAll()` drops everything your owner registered. Worth calling
+  when your owner goes away: handlers hold your objects, and through them your
+  class loader. On Paper this is automatic — the CoffeeLib plugin clears a
+  plugin's handlers when it is disabled, so a `/reload` cannot leave the old
+  copy of your classes answering events.
+
+> **One copy of CoffeeLib, or no shared channel.** Delivery between owners only
+> works while they all load the same CoffeeLib classes. Install it as its own
+> mod jar on Forge/NeoForge, and as its own plugin on Paper — where your plugin
+> also needs CoffeeLib under `depend` or `softdepend` in its `plugin.yml` to
+> resolve those classes from it. A mod or plugin that shades CoffeeLib into
+> itself gets a private bus instead, which is fine if intended and silent if
+> not. `new DefaultEventBus("myid")` is the honest way to ask for a private one.
 
 ---
 

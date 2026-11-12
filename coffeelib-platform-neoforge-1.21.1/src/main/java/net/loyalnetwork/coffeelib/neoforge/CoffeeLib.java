@@ -2,6 +2,8 @@ package net.loyalnetwork.coffeelib.neoforge;
 
 import net.loyalnetwork.coffeelib.api.config.ConfigFormat;
 import net.loyalnetwork.coffeelib.api.config.ReloadableConfigManager;
+import net.loyalnetwork.coffeelib.api.event.EventBus;
+import net.loyalnetwork.coffeelib.core.event.SharedEventBus;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.loading.FMLPaths;
 
@@ -56,6 +58,36 @@ public final class CoffeeLib {
      */
     public static ReloadableConfigManager detached(String modId) {
         return new NeoForgeConfigManager(modId, null, null, CoffeeLib::configDirectory);
+    }
+
+    /**
+     * The CoffeeLib event bus, as a handle bound to the calling mod. Call it
+     * from the mod's constructor, where the {@code ModContainer} gives the owner
+     * id; {@link #eventBus(String)} works anywhere.
+     * <p>
+     * This is CoffeeLib's own bus, not NeoForge's: handlers registered here
+     * see events posted by any other mod using the library, on any platform,
+     * with no NeoForge event classes involved. NeoForge's own
+     * {@code IEventBus} is still the right place for Minecraft's events.
+     * <p>
+     * Cross-mod delivery needs every mod to load the same CoffeeLib classes,
+     * which is what installing this jar as a mod gives you. A mod that shades
+     * CoffeeLib into itself gets a private bus instead - see
+     * {@link net.loyalnetwork.coffeelib.core.event.SharedEventBus}.
+     */
+    public static EventBus eventBus(ModContainer container) {
+        return eventBus(container.getModId());
+    }
+
+    /**
+     * The event bus as a handle bound to {@code modId}, callable at any point
+     * in a mod's life.
+     *
+     * @param modId the mod this handle belongs to - the id its handlers are
+     *              recorded against, and the one {@code unregisterAll()} clears
+     */
+    public static EventBus eventBus(String modId) {
+        return SharedEventBus.forOwner(modId);
     }
 
     /**
