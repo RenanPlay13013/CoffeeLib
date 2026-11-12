@@ -111,7 +111,7 @@ class CoffeeLibTest {
             assertEquals("root", config.database.credentials.username);
             assertEquals("changeme", config.database.credentials.password);
 
-            verify(context).registerConfig(eq(ModConfig.Type.COMMON), any(ForgeConfigSpec.class), eq("server"));
+            verify(context).registerConfig(eq(ModConfig.Type.COMMON), any(ForgeConfigSpec.class), eq("server.toml"));
         }
     }
 
@@ -180,7 +180,7 @@ class CoffeeLibTest {
             manager.load(ServerConfig.class);
 
             // Only the native one goes to Forge; only the managed ones are CoffeeLib's to reload.
-            verify(context).registerConfig(eq(ModConfig.Type.COMMON), any(ForgeConfigSpec.class), eq("server"));
+            verify(context).registerConfig(eq(ModConfig.Type.COMMON), any(ForgeConfigSpec.class), eq("server.toml"));
             assertEquals(List.of("managed.yml", "managed-json.json"), manager.managedFiles());
             assertEquals(2, manager.reloadAll());
         }
@@ -219,6 +219,35 @@ class CoffeeLibTest {
         // manager has no event bus to hand Forge — so it says so instead of NPE-ing.
         ConfigException e = assertThrows(ConfigException.class, () -> manager.load(ServerConfig.class));
         assertTrue(e.getMessage().contains("@ConfigFile(format = ...)"));
+    }
+
+    @Test
+    void aNativeConfigGetsTheTomlExtensionForgeExpects() {
+        IEventBus eventBus = mock(IEventBus.class);
+        ForgeSpecConfigManager manager = new ForgeSpecConfigManager(eventBus);
+
+        ModLoadingContext context = mock(ModLoadingContext.class);
+        try (MockedStatic<ModLoadingContext> mocked = mockStatic(ModLoadingContext.class)) {
+            mocked.when(ModLoadingContext::get).thenReturn(context);
+
+            manager.load(ServerConfig.class);
+
+            // Forge resolves this string as the whole file name, so passing the annotation
+            // value raw wrote a file literally called 'server', with no extension.
+            verify(context).registerConfig(eq(ModConfig.Type.COMMON), any(ForgeConfigSpec.class),
+                    eq("server.toml"));
+        }
+    }
+
+    @Test
+    void managedConfigsCanLiveOutsideTheLoadersConfigDirectory(@TempDir Path tempDir) {
+        Path own = tempDir.resolve("mymod");
+        ForgeConfigManager manager = new ForgeConfigManager("examplemod", mock(IEventBus.class), () -> own);
+
+        manager.load(ManagedServerConfig.class);
+
+        assertTrue(Files.exists(own.resolve("managed.yml")), "the directory is created on first write");
+        assertEquals(List.of("managed.yml"), manager.managedFiles());
     }
 
     @Test

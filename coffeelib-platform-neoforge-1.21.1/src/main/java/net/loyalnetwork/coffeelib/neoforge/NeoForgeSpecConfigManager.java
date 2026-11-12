@@ -8,6 +8,7 @@ import net.loyalnetwork.coffeelib.api.config.annotation.Key;
 import net.loyalnetwork.coffeelib.api.config.annotation.OneOf;
 import net.loyalnetwork.coffeelib.api.config.annotation.Range;
 import net.loyalnetwork.coffeelib.api.config.exception.ConfigException;
+import net.loyalnetwork.coffeelib.core.config.ConfigFileNames;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.config.ModConfig;
@@ -75,7 +76,11 @@ final class NeoForgeSpecConfigManager implements ConfigManager {
         scanFields(type, instance, builder, bindings, new ArrayDeque<>());
         ModConfigSpec spec = builder.build();
 
-        container.registerConfig(ModConfig.Type.COMMON, spec, configFile.value());
+        // withExtension, not the raw annotation value: this loader resolves exactly the
+        // string it is given, so "server" would write a file literally called 'server'
+        // with no extension, next to every other mod's .toml.
+        String fileName = ConfigFileNames.withExtension(configFile.value(), "toml");
+        container.registerConfig(ModConfig.Type.COMMON, spec, fileName);
         registrations.add(new Registration(instance, spec, bindings));
         return instance;
     }

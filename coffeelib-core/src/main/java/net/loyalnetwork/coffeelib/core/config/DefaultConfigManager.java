@@ -76,7 +76,7 @@ public final class DefaultConfigManager implements ConfigManager {
     }
 
     private Path resolvePath(ConfigModel model) {
-        return baseDirectory.resolve(model.getFileName() + "." + backend.fileExtension());
+        return ConfigFileNames.resolve(baseDirectory, model.getFileName(), backend.fileExtension());
     }
 
     private <T> T instantiate(Class<T> type) {

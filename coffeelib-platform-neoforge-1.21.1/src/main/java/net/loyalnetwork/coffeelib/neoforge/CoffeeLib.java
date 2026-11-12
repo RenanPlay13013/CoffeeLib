@@ -8,6 +8,7 @@ import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.loading.FMLPaths;
 
 import java.nio.file.Path;
+import java.util.function.Supplier;
 
 /** Entry point for the NeoForge platform. */
 public final class CoffeeLib {
@@ -37,8 +38,26 @@ public final class CoffeeLib {
      * </ul>
      */
     public static ReloadableConfigManager forMod(ModContainer container) {
-        return new NeoForgeConfigManager(
-                container.getModId(), container, container.getEventBus(), CoffeeLib::configDirectory);
+        return forMod(container, null);
+    }
+
+    /**
+     * {@link #forMod(ModContainer)}, with CoffeeLib-managed configs going to
+     * {@code configDirectory} instead of the loader's {@code config/}.
+     * <p>
+     * For a mod that wants its files somewhere of its own —
+     * {@code FMLPaths.GAMEDIR.get().resolve("mymod")}, say. The directory is
+     * created on first write, and a relative path resolves against the process
+     * working directory, which for a server is the game directory.
+     * {@link ConfigFormat#NATIVE} configs are unaffected: the loader owns
+     * those, and it always writes them under {@code config/}.
+     *
+     * @param configDirectory where managed configs live, or {@code null} for
+     *                        the loader's own {@code config/}
+     */
+    public static ReloadableConfigManager forMod(ModContainer container, Path configDirectory) {
+        return new NeoForgeConfigManager(container.getModId(), container, container.getEventBus(),
+                directorySupplier(configDirectory));
     }
 
     /**
@@ -57,7 +76,26 @@ public final class CoffeeLib {
      *              types in {@code /coffeelib config reload <mod>}
      */
     public static ReloadableConfigManager detached(String modId) {
-        return new NeoForgeConfigManager(modId, null, null, CoffeeLib::configDirectory);
+        return detached(modId, null);
+    }
+
+    /**
+     * {@link #detached(String)}, with managed configs going to
+     * {@code configDirectory} instead of the loader's {@code config/}.
+     *
+     * @param configDirectory where managed configs live, or {@code null} for
+     *                        the loader's own {@code config/}
+     */
+    public static ReloadableConfigManager detached(String modId, Path configDirectory) {
+        return new NeoForgeConfigManager(modId, null, null, directorySupplier(configDirectory));
+    }
+
+    /**
+     * Keeps the caller's directory lazy the same way the default one is, so
+     * neither is resolved until a managed config is actually loaded.
+     */
+    private static Supplier<Path> directorySupplier(Path configDirectory) {
+        return configDirectory != null ? () -> configDirectory : CoffeeLib::configDirectory;
     }
 
     /**

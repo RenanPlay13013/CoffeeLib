@@ -122,12 +122,50 @@ dependencies {
 
 | Anotação          | Onde   | Propósito                                                          |
 | ----------------- | ------ | -------------------------------------                             |
-| `@ConfigFile`     | tipo   | Nome do arquivo (sem extensão) e, opcionalmente, o `format`.      |
+| `@ConfigFile`     | tipo   | Nome do arquivo (sem extensão, `/` para subpastas) e, opcionalmente, o `format`. |
 | `@Key`            | campo  | Sobrescreve a chave gravada no arquivo (padrão: nome do campo).   |
 | `@Comment`        | campo  | Comentário(s) escrito(s) acima da chave no arquivo gerado.        |
 | `@Ignore`         | campo  | Exclui o campo do load/save totalmente.                           |
 | `@Range(min,max)` | campo  | Limites numéricos, validados no load/reload.                      |
 | `@OneOf({...})`   | campo  | Restringe um campo String a um conjunto fixo, com sugestões.      |
+
+### Nomes de arquivo e onde as configs ficam
+
+O valor do `@ConfigFile` é um nome relativo ao diretório de config, sem
+extensão — o backend acrescenta a dele. Uma `/` coloca o arquivo numa subpasta,
+que é criada na primeira escrita:
+
+```java
+@ConfigFile("server")                 // config/server.yml
+@ConfigFile("mymod/database")         // config/mymod/database.yml
+```
+
+O nome precisa ficar dentro desse diretório: `..`, caminho absoluto, `\`,
+segmento vazio e nome que já carrega a extensão do backend são todos recusados
+no load, com mensagem dizendo o motivo. (`../mymod/server` resolvia antes,
+gravando silenciosamente fora da pasta que a plataforma entregou ao CoffeeLib.)
+
+Querer os arquivos em outro lugar é legítimo, e é uma decisão do dono, tomada
+na chamada em vez de ser efeito colateral de uma string — passe o diretório ao
+criar o manager:
+
+```java
+// Forge/NeoForge: onde você quiser, em vez do config/ do loader
+var configs = CoffeeLib.forMod(FMLPaths.GAMEDIR.get().resolve("mymod"));
+var configs = CoffeeLib.detached("mymod", Path.of("/srv/configs-compartilhadas"));
+
+// Paper: em vez da data folder do próprio plugin
+var configs = CoffeeLib.forPlugin(this, getDataFolder().getParentFile().toPath().resolve("shared"));
+```
+
+O `ConfigFormat.NATIVE` é a exceção: o loader é dono daqueles arquivos e sempre
+os grava sob `config/`, então diretório customizado não se aplica a eles.
+
+Uma config gerenciada é identificada para o operador pelo caminho relativo ao
+diretório base, que é o que o `/coffeelib config` lista e aceita:
+`mymod/database.yml`. O nome puro do arquivo também funciona enquanto só uma
+config gerenciada o tiver; com duas, o comando diz quais poderiam ser em vez de
+recarregar a primeira que apareceu.
 
 ### Formatos de config
 
@@ -135,7 +173,7 @@ dependencies {
 
 | Formato  | Arquivo | Quem é dono do arquivo                                          |
 | -------- | ------- | --------------------------------------------------------------- |
-| `NATIVE` | varia   | A plataforma. No Paper isso significa YAML (ou seja, o CoffeeLib); no Forge/NeoForge é o TOML do próprio `ForgeConfigSpec`/`ModConfigSpec`. |
+| `NATIVE` | varia   | A plataforma. No Paper isso significa YAML (ou seja, o CoffeeLib); no Forge/NeoForge é o TOML do próprio `ForgeConfigSpec`/`ModConfigSpec`, gravado como `config/<nome>.toml`. |
 | `YAML`   | `.yml`  | CoffeeLib (Configurate/SnakeYAML). Comentários preservados.     |
 | `JSON`   | `.json` | CoffeeLib (Configurate/Gson). Comentários descartados — JSON não tem. |
 | `HOCON`  | `.conf` | CoffeeLib (Configurate/HOCON). Comentários preservados.         |

@@ -114,7 +114,7 @@ class CoffeeLibTest {
         assertEquals("root", config.database.credentials.username);
         assertEquals("changeme", config.database.credentials.password);
 
-        verify(container).registerConfig(eq(ModConfig.Type.COMMON), any(ModConfigSpec.class), eq("server"));
+        verify(container).registerConfig(eq(ModConfig.Type.COMMON), any(ModConfigSpec.class), eq("server.toml"));
     }
 
     @Test
@@ -159,7 +159,7 @@ class CoffeeLibTest {
         manager.load(ServerConfig.class);
 
         // Only the native one goes to NeoForge; only the managed ones are CoffeeLib's to reload.
-        verify(container).registerConfig(eq(ModConfig.Type.COMMON), any(ModConfigSpec.class), eq("server"));
+        verify(container).registerConfig(eq(ModConfig.Type.COMMON), any(ModConfigSpec.class), eq("server.toml"));
         assertEquals(List.of("managed.conf", "managed-yaml.yml"), manager.managedFiles());
         assertEquals(2, manager.reloadAll());
     }
@@ -197,6 +197,29 @@ class CoffeeLibTest {
         // manager has no container to hand NeoForge — so it says so instead of NPE-ing.
         ConfigException e = assertThrows(ConfigException.class, () -> manager.load(ServerConfig.class));
         assertTrue(e.getMessage().contains("@ConfigFile(format = ...)"));
+    }
+
+    @Test
+    void aNativeConfigGetsTheTomlExtensionNeoForgeExpects(@TempDir Path tempDir) {
+        ModContainer container = mock(ModContainer.class);
+
+        manager(container, mock(IEventBus.class), tempDir).load(ServerConfig.class);
+
+        // NeoForge resolves this string as the whole file name, so passing the annotation
+        // value raw wrote a file literally called 'server', with no extension.
+        verify(container).registerConfig(eq(ModConfig.Type.COMMON), any(ModConfigSpec.class), eq("server.toml"));
+    }
+
+    @Test
+    void managedConfigsCanLiveOutsideTheLoadersConfigDirectory(@TempDir Path tempDir) {
+        Path own = tempDir.resolve("mymod");
+        NeoForgeConfigManager manager = new NeoForgeConfigManager(
+                "examplemod", mock(ModContainer.class), mock(IEventBus.class), () -> own);
+
+        manager.load(ManagedYamlConfig.class);
+
+        assertTrue(Files.exists(own.resolve("managed-yaml.yml")), "the directory is created on first write");
+        assertEquals(List.of("managed-yaml.yml"), manager.managedFiles());
     }
 
     @Test

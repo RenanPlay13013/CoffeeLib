@@ -5,6 +5,7 @@ import net.loyalnetwork.coffeelib.api.config.ConfigFormat;
 import net.loyalnetwork.coffeelib.api.config.ConfigReloadService;
 import net.loyalnetwork.coffeelib.api.config.annotation.ConfigFile;
 import net.loyalnetwork.coffeelib.api.config.exception.ConfigException;
+import net.loyalnetwork.coffeelib.core.config.ConfigFileNames;
 import net.loyalnetwork.coffeelib.core.config.DefaultConfigManager;
 import net.loyalnetwork.coffeelib.core.config.format.ConfigBackends;
 
@@ -122,7 +123,12 @@ public final class ManagedConfigService implements ConfigReloadService {
         T instance = manager.load(type);
 
         Path file = manager.fileOf(type);
-        Entry entry = new Entry(file.getFileName().toString(), file, instance, manager);
+        // Named by its path relative to the base directory, so a config in a subdirectory
+        // stays distinguishable from another one with the same file name.
+        String name = ConfigFileNames.identifier(baseDirectory, file);
+        requireNotAlreadyLoaded(name, file, type);
+
+        Entry entry = new Entry(name, file, instance, manager);
         entry.rememberContents();
         entries.add(entry);
 
@@ -131,6 +137,22 @@ public final class ManagedConfigService implements ConfigReloadService {
             running.watch(file.getParent());
         }
         return instance;
+    }
+
+    /**
+     * Two configs resolving to the same file would both reload it and both
+     * write it, each overwriting the other's values, so loading one twice is
+     * rejected rather than left to produce a confusing duplicate in
+     * {@link #managedFiles()}.
+     */
+    private void requireNotAlreadyLoaded(String name, Path file, Class<?> type) {
+        for (Entry entry : entries) {
+            if (entry.file().equals(file)) {
+                throw new ConfigException("Config file '" + name + "' is already loaded by "
+                        + entry.instance().getClass().getName() + "; " + type.getName()
+                        + " would write the same file");
+            }
+        }
     }
 
     /** Whether {@code config} is an instance this service loaded. */
@@ -163,13 +185,47 @@ public final class ManagedConfigService implements ConfigReloadService {
 
     @Override
     public boolean reload(String fileName) {
+        Entry entry = findByName(fileName);
+        if (entry == null) {
+            return false;
+        }
+        reload(entry);
+        return true;
+    }
+
+    /**
+     * Resolves what an operator typed: the name {@link #managedFiles()} reports
+     * ({@code "mymod/server.yml"}), or just the file name when exactly one
+     * managed config has it.
+     * <p>
+     * The bare name is a convenience, not a guess — with two configs called
+     * {@code server.yml} in different subdirectories it fails instead of
+     * reloading whichever happened to be registered first, because silently
+     * acting on the wrong file is worse than an error telling you to be
+     * specific.
+     */
+    private Entry findByName(String fileName) {
         for (Entry entry : entries) {
             if (entry.fileName().equalsIgnoreCase(fileName)) {
-                reload(entry);
-                return true;
+                return entry;
             }
         }
-        return false;
+
+        List<Entry> byFileName = new ArrayList<>();
+        for (Entry entry : entries) {
+            if (entry.file().getFileName().toString().equalsIgnoreCase(fileName)) {
+                byFileName.add(entry);
+            }
+        }
+        if (byFileName.size() > 1) {
+            List<String> candidates = new ArrayList<>();
+            for (Entry entry : byFileName) {
+                candidates.add(entry.fileName());
+            }
+            throw new ConfigException("'" + fileName + "' matches more than one managed config ("
+                    + String.join(", ", candidates) + "); name the one you mean");
+        }
+        return byFileName.isEmpty() ? null : byFileName.get(0);
     }
 
     @Override

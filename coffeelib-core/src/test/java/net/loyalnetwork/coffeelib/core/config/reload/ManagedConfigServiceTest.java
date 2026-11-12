@@ -188,6 +188,69 @@ class ManagedConfigServiceTest {
         assertThrows(ConfigException.class, () -> service.reload(new YamlServerConfig()));
     }
 
+    @ConfigFile(value = "mymod/server", format = ConfigFormat.YAML)
+    public static final class NestedServerConfig {
+        public String host = "nested.example";
+    }
+
+    @ConfigFile(value = "other/server", format = ConfigFormat.YAML)
+    public static final class OtherNestedServerConfig {
+        public String host = "other.example";
+    }
+
+    @Test
+    void aConfigInASubdirectoryKeepsItsPathAsItsName(@TempDir Path tempDir) {
+        ManagedConfigService service = new ManagedConfigService("testmod", tempDir);
+
+        NestedServerConfig config = service.load(NestedServerConfig.class);
+
+        assertTrue(Files.exists(tempDir.resolve("mymod").resolve("server.yml")));
+        assertEquals(List.of("mymod/server.yml"), service.managedFiles());
+        assertTrue(service.reload("mymod/server.yml"), "the name an operator sees is the one that works");
+        assertEquals("nested.example", config.host);
+    }
+
+    @Test
+    void theBareFileNameWorksWhileItIsUnambiguous(@TempDir Path tempDir) {
+        ManagedConfigService service = new ManagedConfigService("testmod", tempDir);
+        service.load(NestedServerConfig.class);
+
+        assertTrue(service.reload("server.yml"), "one match, so the short name is enough");
+
+        // A second config with the same file name makes it ambiguous, and guessing which
+        // one an operator meant would be worse than saying so.
+        service.load(OtherNestedServerConfig.class);
+        ConfigException e = assertThrows(ConfigException.class, () -> service.reload("server.yml"));
+        assertTrue(e.getMessage().contains("mymod/server.yml"));
+        assertTrue(e.getMessage().contains("other/server.yml"));
+
+        assertTrue(service.reload("other/server.yml"), "the full name still resolves");
+    }
+
+    @Test
+    void loadingTwoConfigsOntoTheSameFileIsRejected(@TempDir Path tempDir) {
+        ManagedConfigService service = new ManagedConfigService("testmod", tempDir);
+        service.load(YamlServerConfig.class);
+
+        // Both would write the file, each overwriting the other's values.
+        ConfigException e = assertThrows(ConfigException.class, () -> service.load(YamlServerConfig.class));
+        assertTrue(e.getMessage().contains("already loaded"));
+        assertEquals(List.of("server.yml"), service.managedFiles());
+    }
+
+    @Test
+    void anEscapingNameIsRejectedRatherThanWritingOutsideTheBase(@TempDir Path tempDir) {
+        ManagedConfigService service = new ManagedConfigService("testmod", tempDir.resolve("config"));
+
+        assertThrows(ConfigException.class, () -> service.load(EscapingConfig.class));
+        assertTrue(Files.notExists(tempDir.resolve("outside")), "nothing should have been written");
+    }
+
+    @ConfigFile(value = "../outside/server", format = ConfigFormat.YAML)
+    public static final class EscapingConfig {
+        public String host = "localhost";
+    }
+
     private static void edit(Path file, String from, String to) throws IOException {
         Files.writeString(file, Files.readString(file).replace(from, to));
     }

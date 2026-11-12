@@ -6,6 +6,8 @@ import net.loyalnetwork.coffeelib.api.event.EventBus;
 import net.loyalnetwork.coffeelib.core.event.SharedEventBus;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import java.nio.file.Path;
+
 /** Entry point for the Paper platform. */
 public final class CoffeeLib {
 
@@ -24,7 +26,21 @@ public final class CoffeeLib {
      * manual reload and hot reload available on the returned manager.
      */
     public static ReloadableConfigManager forPlugin(JavaPlugin plugin) {
-        return new PaperConfigManager(plugin.getName(), plugin.getDataFolder().toPath());
+        return forPlugin(plugin, null);
+    }
+
+    /**
+     * {@link #forPlugin(JavaPlugin)}, with configs going to
+     * {@code configDirectory} instead of the plugin's data folder — a folder
+     * shared between a group of plugins, say. The directory is created on
+     * first write.
+     *
+     * @param configDirectory where configs live, or {@code null} for
+     *                        {@code plugin}'s own data folder
+     */
+    public static ReloadableConfigManager forPlugin(JavaPlugin plugin, Path configDirectory) {
+        Path directory = configDirectory != null ? configDirectory : plugin.getDataFolder().toPath();
+        return new PaperConfigManager(plugin.getName(), directory);
     }
 
     /**

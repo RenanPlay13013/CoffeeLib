@@ -8,6 +8,7 @@ import net.loyalnetwork.coffeelib.api.config.annotation.Key;
 import net.loyalnetwork.coffeelib.api.config.annotation.OneOf;
 import net.loyalnetwork.coffeelib.api.config.annotation.Range;
 import net.loyalnetwork.coffeelib.api.config.exception.ConfigException;
+import net.loyalnetwork.coffeelib.core.config.ConfigFileNames;
 import net.minecraftforge.common.ForgeConfigSpec;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.ModLoadingContext;
@@ -76,7 +77,11 @@ final class ForgeSpecConfigManager implements ConfigManager {
         scanFields(type, instance, builder, bindings, new ArrayDeque<>());
         ForgeConfigSpec spec = builder.build();
 
-        ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, spec, configFile.value());
+        // withExtension, not the raw annotation value: this loader resolves exactly the
+        // string it is given, so "server" would write a file literally called 'server'
+        // with no extension, next to every other mod's .toml.
+        String fileName = ConfigFileNames.withExtension(configFile.value(), "toml");
+        ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, spec, fileName);
         registrations.add(new Registration(instance, spec, bindings));
         return instance;
     }
