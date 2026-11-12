@@ -29,8 +29,10 @@ compartilhado entre donos na mesma JVM.
   (conjuntos de strings tipo enum) falham de forma visível, e `@OneOf` sugere o
   valor mais próximo ("você quis dizer **hard**?") usando um matcher baseado em
   distância de Levenshtein.
-- **Objetos e listas aninhados** — POJOs aninhados e `List<T>` de escalares ou
-  de POJOs aninhados, com detecção de ciclos.
+- **Formas de campo realmente suportadas** — todo primitivo e wrapper,
+  `String`, enums, POJOs aninhados em qualquer profundidade, `List`/`Set` de
+  escalares ou POJOs, e `Map<String, V>`. Qualquer outra coisa é recusada pelo
+  nome no startup, em vez de gravada como valor vazio.
 - **Container DI pequeno e explícito** — fiação `@Provide` / `@Receive` por
   tipo, com providers nomeados e singletons.
 - **Event bus próprio** — um canal compartilhado por todos os mods e plugins da
@@ -89,22 +91,26 @@ repositories {
 
 dependencies {
     // Paper
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-paper:3.2")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-paper:3.3")
     // Forge 1.20.1
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-forge-1.20.1:3.2")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-forge-1.20.1:3.3")
     // NeoForge 1.21.1
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-neoforge-1.21.1:3.2")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-neoforge-1.21.1:3.3")
     // Ou apenas o core agnóstico de formato (config + DI, sem backend de plataforma)
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-core:3.2")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-core:3.3")
     // Ou só as interfaces e anotações
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-api:3.2")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-api:3.3")
 }
 ```
 
 > O projeto raiz é um container — use as coordenadas de **módulo** acima com
 > `com.github.<usuário>.<repo>:<módulo>:<tag>`.
 >
-> **Comece na `3.2`.** A `3.1` é a mesma lib antes de as configs poderem ficar
+> **Comece na `3.3`.** Antes dela, um campo `List`, `Map`, array, `byte` ou
+> `char` era gravado como valor vazio - destruindo o que o operador tivesse
+> digitado naquela chave - e um campo `Byte` ou `Character` derrubava o servidor
+> no startup com erro de JPMS. A `3.2` é no mais a mesma lib; a `3.1` é a `3.2`
+> antes de as configs poderem ficar
 > fora do `config/` e antes de um config `NATIVE` no Forge/NeoForge ganhar a
 > extensão `.toml` — ao subir dela esse arquivo é renomeado, e os valores do
 > antigo sem extensão não vão junto. A `3.0.4` é a `3.1` sem o event bus; a `3.0.3` também resolve, mas os POMs de plataforma dela declaram
@@ -283,11 +289,54 @@ public class AppConfig {
 }
 ```
 
-* `List<T>` de escalares é gravada como lista fluida (`tags: [survival, pvp]`).
-* `List<T>` de objetos aninhados cria uma instância nova por elemento no reload
-  (os elementos não têm identidade a preservar).
-* `@Range`/`@OneOf` não são permitidos em listas ou objetos aninhados — são
-  restrições apenas de campos folha.
+Uma `List`, `Set` ou `Map<String, V>` pode conter escalares ou objetos de
+config, e o tipo do elemento vem da assinatura genérica do campo — então
+declare-o (`List<String>`, não uma `List` crua):
+
+```java
+@ConfigFile(value = "crates", format = ConfigFormat.YAML)
+public class CratesConfig {
+    public List<String> tags = new ArrayList<>(List.of("survival", "pvp"));
+    public List<Crate> crates = new ArrayList<>(List.of(new Crate()));
+    public Map<String, Integer> weights = new LinkedHashMap<>(Map.of("common", 70));
+}
+```
+
+```yaml
+tags:
+- survival
+- pvp
+crates:
+- name: diamond
+  value: 1
+weights:
+  common: 70
+```
+
+* Uma coleção é **substituída** no load, não mesclada: o arquivo é a fonte da
+  verdade, então um elemento que o operador apagou continua apagado.
+* Elementos que são objetos de config recebem instância nova a cada load — eles
+  não têm identidade a preservar, diferente de um objeto aninhado, que é um
+  campo só.
+* Um campo `Set` mantém semântica de conjunto; qualquer outra `Collection` vira
+  lista.
+* `@Comment` não é levado para dentro de elementos de coleção: teria que se
+  repetir por elemento, e nenhum formato posiciona comentário por item de
+  sequência de forma confiável.
+* `@Range`/`@OneOf` valem só para campos escalares; em qualquer outra coisa são
+  recusados, em vez de ignorados em silêncio.
+
+**Recusado, com o campo nomeado, no `load`:** arrays (declare uma `List`),
+genéricos crus ou com wildcard, `Map` com chave que não seja `String`, tipos do
+JDK sem codec (`Duration`, `UUID`, ...), interfaces e classes abstratas,
+classes internas não estáticas. Cada caso lança `ConfigException` dizendo o que
+usar no lugar. Nada é gravado no arquivo quando o scan falha, então uma config
+que não pode ser representada nunca sobrescreve uma que pode.
+
+> No Forge e no NeoForge isso vale para os formatos gerenciados pelo CoffeeLib.
+> Uma config `NATIVE` é descrita pelo spec do próprio loader, que não tem noção
+> de coleção nem valor `byte`/`char`: esses também são recusados, apontando para
+> um formato gerenciado.
 
 ### Validação
 
@@ -546,11 +595,11 @@ O `build` compila todos os módulos e copia o jar de cada um para `./dist`:
 ```bash
 ./gradlew build
 ls dist/
-# coffeelib-forge-1.20.1-3.2-SNAPSHOT.jar      <- instale este (autocontido)
-# coffeelib-neoforge-1.21.1-3.2-SNAPSHOT.jar   <- instale este (autocontido)
-# coffeelib-paper-3.2-SNAPSHOT.jar             <- instale este (autocontido)
-# coffeelib-api-3.2-SNAPSHOT.jar               <- compile contra estes
-# coffeelib-core-3.2-SNAPSHOT.jar
+# coffeelib-forge-1.20.1-3.3-SNAPSHOT.jar      <- instale este (autocontido)
+# coffeelib-neoforge-1.21.1-3.3-SNAPSHOT.jar   <- instale este (autocontido)
+# coffeelib-paper-3.3-SNAPSHOT.jar             <- instale este (autocontido)
+# coffeelib-api-3.3-SNAPSHOT.jar               <- compile contra estes
+# coffeelib-core-3.3-SNAPSHOT.jar
 ```
 
 São dois tipos de jar, para dois usos diferentes.

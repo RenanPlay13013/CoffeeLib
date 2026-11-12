@@ -250,6 +250,33 @@ class CoffeeLibTest {
         assertEquals(List.of("managed.yml"), manager.managedFiles());
     }
 
+    @ConfigFile("listed")
+    public static final class NativeListConfig {
+        public java.util.List<String> values = new java.util.ArrayList<>();
+    }
+
+    @ConfigFile("boxed")
+    public static final class NativeBoxedByteConfig {
+        public Byte tiny = 7;
+    }
+
+    @Test
+    void aNativeConfigRefusesShapesTheSpecCannotHoldInsteadOfCrashing() {
+        ForgeSpecConfigManager manager = new ForgeSpecConfigManager(mock(IEventBus.class));
+
+        // Both used to recurse into a type with no config fields: the list produced an
+        // empty section, and the wrapper hit setAccessible on java.lang.Byte and took the
+        // server down with an InaccessibleObjectException.
+        ConfigException listFailure = assertThrows(ConfigException.class,
+                () -> manager.load(NativeListConfig.class));
+        assertTrue(listFailure.getMessage().contains("collection"), listFailure.getMessage());
+        assertTrue(listFailure.getMessage().contains("@ConfigFile(format ="), "should point at a managed format");
+
+        ConfigException byteFailure = assertThrows(ConfigException.class,
+                () -> manager.load(NativeBoxedByteConfig.class));
+        assertTrue(byteFailure.getMessage().contains("Byte"), byteFailure.getMessage());
+    }
+
     @Test
     void aManagerIsReachableByModIdForTheCommandToActOn(@TempDir Path tempDir) {
         ForgeConfigManager manager = new ForgeConfigManager("registrymod", mock(IEventBus.class), () -> tempDir);

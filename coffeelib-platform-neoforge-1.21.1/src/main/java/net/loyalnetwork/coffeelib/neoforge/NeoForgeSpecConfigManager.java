@@ -19,6 +19,8 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.ArrayDeque;
+import java.util.Collection;
+import java.util.Map;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Deque;
@@ -149,6 +151,7 @@ final class NeoForgeSpecConfigManager implements ConfigManager {
                         throw new ConfigException("@Range/@OneOf cannot be applied to nested object field '"
                                 + field.getName() + "' in " + type.getName());
                     }
+                    requireSpecCompatible(field, type, fieldType);
                     Object nested = nestedInstance(instance, field);
                     builder.push(key);
                     scanFields(fieldType, nested, builder, bindings, stack);
@@ -207,6 +210,16 @@ final class NeoForgeSpecConfigManager implements ConfigManager {
                     ? builder.defineInRange(key, (Short) defaultValue, (short) range.min(), (short) range.max(), Short.class)
                     : builder.<Short>define(key, (Short) defaultValue);
         }
+        if (fieldType == byte.class || fieldType == Byte.class
+                || fieldType == char.class || fieldType == Character.class) {
+            // night-config, underneath the spec, stores integers as longs and has no char at
+            // all, so a ConfigValue<Byte>/<Character> would hand back the wrong type and fail
+            // on assignment. Better to say it here than to fail mid-load.
+            throw new ConfigException("Field '" + key + "' is a " + fieldType.getSimpleName()
+                    + ", which NeoForge's config system cannot store - use int or String here, or give the class "
+                    + "@ConfigFile(format = YAML | JSON | HOCON) to have CoffeeLib manage the file.");
+        }
+
         throw new ConfigException("Unsupported field type " + fieldType.getName() + " for key '" + key + "'");
     }
 
@@ -259,6 +272,46 @@ final class NeoForgeSpecConfigManager implements ConfigManager {
             return constructor.newInstance();
         } catch (ReflectiveOperationException e) {
             throw new ConfigException("Config class " + type.getName() + " must expose a no-args constructor", e);
+        }
+    }
+
+    /**
+     * Whether this loader's config system can hold {@code type} as a nested
+     * section, as opposed to a value it has no notion of.
+     * <p>
+     * Without this check the scan treated "not a scalar" as "a nested object"
+     * and recursed into whatever it found: a {@code List} field reached an
+     * interface with no fields and produced an empty section, and a
+     * {@code Byte} field reached {@code java.lang.Byte}, called
+     * {@code setAccessible} on its private {@code value}, and brought the
+     * whole server down with a JPMS error. Neither shape is expressible in a
+     * {@code NeoForge}, so the honest answer is to say which field is the problem
+     * and what this platform does support.
+     */
+    private static void requireSpecCompatible(Field field, Class<?> owner, Class<?> candidate) {
+        String where = "'" + field.getName() + "' in " + owner.getName();
+        String name = candidate.getName();
+
+        if (Collection.class.isAssignableFrom(candidate) || Map.class.isAssignableFrom(candidate)
+                || candidate.isArray()) {
+            throw new ConfigException("Field " + where + " is a collection, which NeoForge's own config system "
+                    + "cannot describe. Give the class @ConfigFile(format = YAML | JSON | HOCON) to have "
+                    + "CoffeeLib manage the file, where lists and maps are supported.");
+        }
+        if (name.startsWith("java.") || name.startsWith("javax.") || name.startsWith("jdk.")
+                || name.startsWith("sun.") || name.startsWith("com.sun.")) {
+            throw new ConfigException("Field " + where + " is a " + candidate.getSimpleName()
+                    + ", which has no NeoForge config value. Supported: String, enums, boolean, int, long, double, "
+                    + "float, short, and nested config objects.");
+        }
+        if (candidate.isInterface() || Modifier.isAbstract(candidate.getModifiers())) {
+            throw new ConfigException("Field " + where + " is " + candidate.getSimpleName()
+                    + ", which cannot be instantiated - a config object has to be a concrete class with a "
+                    + "no-args constructor");
+        }
+        if (candidate.isMemberClass() && !Modifier.isStatic(candidate.getModifiers())) {
+            throw new ConfigException("Field " + where + " is a non-static inner class ("
+                    + candidate.getSimpleName() + "), which cannot be instantiated on its own - make it static");
         }
     }
 

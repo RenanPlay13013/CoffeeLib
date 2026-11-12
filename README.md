@@ -26,8 +26,10 @@ shared between owners in the same JVM.
 - **Validation with suggestions** — `@Range` (numeric bounds) and `@OneOf`
   (enum-like string sets) fail loudly, and `@OneOf` suggests the closest match
   ("did you mean **hard**?") using a Levenshtein-distance based matcher.
-- **Arbitrarily nested objects and lists** — nested POJOs and `List<T>` of
-  scalars or of nested POJOs, with cycle detection.
+- **Field shapes that are actually supported** — every primitive and wrapper,
+  `String`, enums, nested POJOs to any depth, `List`/`Set` of scalars or POJOs,
+  and `Map<String, V>`. Anything else is refused by name at startup rather than
+  written out as an empty value.
 - **Small, explicit DI container** — `@Provide` / `@Receive` wiring by type,
   with named providers and singletons.
 - **An event bus of its own** — one channel shared by every mod and plugin on
@@ -89,22 +91,26 @@ repositories {
 
 dependencies {
     // Paper
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-paper:3.2")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-paper:3.3")
     // Forge 1.20.1
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-forge-1.20.1:3.2")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-forge-1.20.1:3.3")
     // NeoForge 1.21.1
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-neoforge-1.21.1:3.2")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-neoforge-1.21.1:3.3")
     // Or just the format-agnostic core (config + DI, no platform backend)
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-core:3.2")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-core:3.3")
     // Or only the interfaces and annotations
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-api:3.2")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-api:3.3")
 }
 ```
 
 > The root project is a container — use the **module** coordinates above with
 > `com.github.<user>.<repo>:<module>:<tag>`.
 >
-> **Start at `3.2`.** `3.1` is the same library before configs could live
+> **Start at `3.3`.** Before it, a `List`, `Map`, array, `byte` or `char` field
+> was written out as an empty value - destroying whatever an operator had typed
+> under that key - and a `Byte` or `Character` field crashed the server at
+> startup with a JPMS error. `3.2` is otherwise the same library; `3.1` is `3.2`
+> before configs could live
 > outside `config/`, and before a `NATIVE` config on Forge/NeoForge got its
 > `.toml` extension — upgrading from it renames that file, and the old
 > extensionless one's values do not follow. `3.0.4` is `3.1` without the event
@@ -282,11 +288,51 @@ public class AppConfig {
 }
 ```
 
-* `List<T>` of scalars is written as a flow list (`tags: [survival, pvp]`).
-* `List<T>` of nested objects builds a fresh instance per element on reload
-  (the elements have no identity to preserve).
-* `@Range`/`@OneOf` are not allowed on lists or nested objects — they are
-  leaf-field constraints only.
+A `List`, `Set` or `Map<String, V>` can hold scalars or config objects, and the
+element type comes from the field's generic signature — so declare it
+(`List<String>`, not a raw `List`):
+
+```java
+@ConfigFile(value = "crates", format = ConfigFormat.YAML)
+public class CratesConfig {
+    public List<String> tags = new ArrayList<>(List.of("survival", "pvp"));
+    public List<Crate> crates = new ArrayList<>(List.of(new Crate()));
+    public Map<String, Integer> weights = new LinkedHashMap<>(Map.of("common", 70));
+}
+```
+
+```yaml
+tags:
+- survival
+- pvp
+crates:
+- name: diamond
+  value: 1
+weights:
+  common: 70
+```
+
+* A collection is **replaced** on load, not merged into: the file is the source
+  of truth, so an element an operator deleted stays deleted.
+* Elements that are config objects get a fresh instance each — they have no
+  identity to preserve, unlike a nested object, which is a single field.
+* A `Set` field keeps set semantics; anything else `Collection` becomes a list.
+* `@Comment` is not carried into collection elements: it would have to repeat
+  per element, and no format places a comment per sequence item reliably.
+* `@Range`/`@OneOf` apply to scalar fields only; on anything else they are
+  refused rather than silently ignored.
+
+**Refused, with the field named, at `load` time:** arrays (declare a `List`),
+raw or wildcard generics, `Map` keyed by anything but `String`, JDK types with
+no codec (`Duration`, `UUID`, ...), interfaces and abstract classes,
+non-static inner classes. Each throws a `ConfigException` saying what to use
+instead. Nothing is written to the file when a scan fails, so a config that
+cannot be represented never overwrites one that can.
+
+> On Forge and NeoForge this applies to CoffeeLib-managed formats. A `NATIVE`
+> config is described by the loader's own spec, which has no notion of
+> collections and no `byte`/`char` value: those are refused too, pointing at a
+> managed format.
 
 ### Validation
 
@@ -539,11 +585,11 @@ listed (`server.yml`). Native configs are untouched by all of this — they stay
 ```bash
 ./gradlew build
 ls dist/
-# coffeelib-forge-1.20.1-3.2-SNAPSHOT.jar      <- install this one (self-contained)
-# coffeelib-neoforge-1.21.1-3.2-SNAPSHOT.jar   <- install this one (self-contained)
-# coffeelib-paper-3.2-SNAPSHOT.jar             <- install this one (self-contained)
-# coffeelib-api-3.2-SNAPSHOT.jar               <- compile against these
-# coffeelib-core-3.2-SNAPSHOT.jar
+# coffeelib-forge-1.20.1-3.3-SNAPSHOT.jar      <- install this one (self-contained)
+# coffeelib-neoforge-1.21.1-3.3-SNAPSHOT.jar   <- install this one (self-contained)
+# coffeelib-paper-3.3-SNAPSHOT.jar             <- install this one (self-contained)
+# coffeelib-api-3.3-SNAPSHOT.jar               <- compile against these
+# coffeelib-core-3.3-SNAPSHOT.jar
 ```
 
 Two kinds of jar, for two different jobs.
