@@ -2,8 +2,8 @@ package net.loyalnetwork.coffeelib.core.permission;
 
 import net.loyalnetwork.coffeelib.api.permission.PermissionDefault;
 
+import java.util.List;
 import java.util.UUID;
-import java.util.function.BiFunction;
 
 /**
  * The resolution order, once, for the platforms that have no permission
@@ -13,43 +13,24 @@ import java.util.function.BiFunction;
  *   <li>a subject that is not a player - the console, a command block - has
  *       everything its operator level allows, which for the console is
  *       everything;</li>
- *   <li>the platform's own permission API, for a node it knows and a handler
- *       that is not just the platform default (Forge/NeoForge's PermissionAPI
- *       with LuckPerms or another permission mod as its handler);</li>
- *   <li>a permission plugin's explicit answer wins (LuckPerms, when present);</li>
+ *   <li>the {@link PermissionSource sources}, in order - on Forge and
+ *       NeoForge the platform's PermissionAPI, then LuckPerms asked
+ *       directly - and the first one with an answer decides;</li>
  *   <li>otherwise the node's declared default decides, with
  *       {@link PermissionDefault#OPERATORS} meaning the given op level.</li>
  * </ol>
- * The permission-plugin step is pluggable so tests can stand in for LuckPerms.
+ * Sources are pluggable so tests can stand in for the platform and LuckPerms.
  */
 public final class PermissionResolver {
 
     private final PermissionNodes nodes;
     private final PermissionPlatform platform;
-    private final BiFunction<UUID, String, Boolean> pluginCheck;
-    private final BiFunction<Object, String, Boolean> nativeCheck;
+    private final List<PermissionSource> sources;
 
-    public PermissionResolver(PermissionNodes nodes, PermissionPlatform platform) {
-        this(nodes, platform, LuckPermsBridge::check);
-    }
-
-    public PermissionResolver(PermissionNodes nodes, PermissionPlatform platform,
-                              BiFunction<UUID, String, Boolean> pluginCheck) {
-        this(nodes, platform, pluginCheck, (subject, node) -> null);
-    }
-
-    /**
-     * @param nativeCheck the platform permission API's answer for a player and
-     *                    node, or {@code null} when it has none to give - node
-     *                    not registered there, no real handler, not a player
-     */
-    public PermissionResolver(PermissionNodes nodes, PermissionPlatform platform,
-                              BiFunction<UUID, String, Boolean> pluginCheck,
-                              BiFunction<Object, String, Boolean> nativeCheck) {
+    public PermissionResolver(PermissionNodes nodes, PermissionPlatform platform, PermissionSource... sources) {
         this.nodes = nodes;
         this.platform = platform;
-        this.pluginCheck = pluginCheck;
-        this.nativeCheck = nativeCheck;
+        this.sources = List.of(sources);
     }
 
     public PermissionNodes nodes() {
@@ -77,14 +58,11 @@ public final class PermissionResolver {
             return def == PermissionDefault.EVERYONE || platform.isOperator(subject, operatorLevel);
         }
 
-        Boolean decided = nativeCheck.apply(subject, node);
-        if (decided != null) {
-            return decided;
-        }
-
-        decided = pluginCheck.apply(player, node);
-        if (decided != null) {
-            return decided;
+        for (PermissionSource source : sources) {
+            Boolean decided = source.check(subject, player, node);
+            if (decided != null) {
+                return decided;
+            }
         }
 
         return switch (def) {

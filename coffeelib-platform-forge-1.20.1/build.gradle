@@ -90,6 +90,12 @@ dependencies {
 
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
 
+    // LuckPerms is optional: its API is called directly when LuckPerms is installed
+    // (permission/*LuckPerms.java), so it is needed to compile and nowhere else - the
+    // LuckPerms mod brings the API classes itself. 5.4 is the oldest API the supported
+    // LuckPerms builds ship, and everything CoffeeLib calls exists since 5.0.
+    compileOnly("net.luckperms:api:5.4")
+
     testImplementation("org.mockito:mockito-core:5.14.2")
 }
 

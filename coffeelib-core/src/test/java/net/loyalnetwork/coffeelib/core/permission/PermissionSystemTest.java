@@ -46,7 +46,7 @@ class PermissionSystemTest {
 
     private PermissionResolver resolver(PermissionNodes nodes) {
         return new PermissionResolver(nodes, PLATFORM,
-                (player, node) -> plugin.getOrDefault(player, Map.of()).get(node));
+                (subject, player, node) -> plugin.getOrDefault(player, Map.of()).get(node));
     }
 
     @Test
@@ -172,12 +172,5 @@ class PermissionSystemTest {
         assertThrows(CoffeeLibException.class, () -> manager.declare(Object.class));
         assertThrows(CoffeeLibException.class, () -> manager.declare("has space", PermissionDefault.EVERYONE, ""));
         manager.declare("crates.*", PermissionDefault.NOBODY, "wildcard segments are valid");
-    }
-
-    @Test
-    void withoutLuckPermsTheBridgeHasNoOpinion() {
-        // The test classpath has no LuckPerms: the bridge must answer "undecided", not fail.
-        assertFalse(LuckPermsBridge.isPresent());
-        assertEquals(null, LuckPermsBridge.check(UUID.randomUUID(), "crates.give"));
     }
 }

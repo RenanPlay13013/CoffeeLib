@@ -83,9 +83,20 @@ public final class PermissionNodeCache {
         return entries;
     }
 
-    /** Adds {@code info} unless the node is already cached. Creates the file, header first, if needed. */
-    public synchronized void append(PermissionNodes.NodeInfo info) {
-        if (read().containsKey(info.node())) {
+    /**
+     * Records {@code info}: added when the node is new, the entry replaced when
+     * the node was cached with another default, op level, owner or
+     * description, nothing when it is already cached as it is. Creates the
+     * file, header first, if needed.
+     */
+    public synchronized void record(PermissionNodes.NodeInfo info) {
+        Map<String, PermissionNodes.NodeInfo> entries = read();
+        PermissionNodes.NodeInfo cached = entries.get(info.node());
+        if (cached != null) {
+            if (!cached.equals(sanitized(info))) {
+                entries.put(info.node(), info);
+                write(entries.values());
+            }
             return;
         }
         try {
@@ -115,28 +126,44 @@ public final class PermissionNodeCache {
                 kept.add(info);
             }
         }
-        if (kept.size() == entries.size()) {
-            return kept;
-        }
-        try {
-            if (kept.isEmpty()) {
-                Files.deleteIfExists(file);
-            } else {
-                StringBuilder content = new StringBuilder(HEADER);
-                for (PermissionNodes.NodeInfo info : kept) {
-                    content.append(format(info)).append(System.lineSeparator());
-                }
-                Files.writeString(file, content.toString(), StandardCharsets.UTF_8);
-            }
-        } catch (IOException e) {
-            LOGGER.log(Level.WARNING, "[CoffeeLib] Could not prune " + file, e);
+        if (kept.size() != entries.size()) {
+            write(kept);
         }
         return kept;
     }
 
+    /** Rewrites the whole file with {@code entries}, or deletes it when there are none. */
+    private void write(java.util.Collection<PermissionNodes.NodeInfo> entries) {
+        try {
+            if (entries.isEmpty()) {
+                Files.deleteIfExists(file);
+            } else {
+                StringBuilder content = new StringBuilder(HEADER);
+                for (PermissionNodes.NodeInfo info : entries) {
+                    content.append(format(info)).append(System.lineSeparator());
+                }
+                Files.createDirectories(file.getParent());
+                Files.writeString(file, content.toString(), StandardCharsets.UTF_8);
+            }
+        } catch (IOException e) {
+            LOGGER.log(Level.WARNING, "[CoffeeLib] Could not rewrite " + file, e);
+        }
+    }
+
     private static String format(PermissionNodes.NodeInfo info) {
-        return String.join("\t", info.node(), info.def().name(), Integer.toString(info.operatorLevel()),
-                info.ownerId(), info.description().replace('\t', ' ').replace('\n', ' ').replace('\r', ' '));
+        PermissionNodes.NodeInfo clean = sanitized(info);
+        return String.join("\t", clean.node(), clean.def().name(), Integer.toString(clean.operatorLevel()),
+                clean.ownerId(), clean.description());
+    }
+
+    /** {@code info} as it reads back from the file: no tabs or line breaks in the free-text fields. */
+    private static PermissionNodes.NodeInfo sanitized(PermissionNodes.NodeInfo info) {
+        return new PermissionNodes.NodeInfo(info.node(), flat(info.ownerId()), info.def(), info.operatorLevel(),
+                flat(info.description()));
+    }
+
+    private static String flat(String text) {
+        return text.replace('\t', ' ').replace('\n', ' ').replace('\r', ' ');
     }
 
     /** A cache line, or {@code null} for the header, a blank line, or anything malformed (skipped, not fatal). */

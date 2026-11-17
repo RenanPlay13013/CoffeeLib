@@ -1,7 +1,6 @@
 package net.loyalnetwork.coffeelib.forge.permission;
 
 import net.loyalnetwork.coffeelib.api.command.CommandSource;
-import net.loyalnetwork.coffeelib.core.permission.LuckPermsBridge;
 import net.loyalnetwork.coffeelib.core.permission.PermissionPlatform;
 import net.loyalnetwork.coffeelib.core.permission.PermissionResolver;
 import net.loyalnetwork.coffeelib.core.permission.SharedPermissions;
@@ -11,8 +10,9 @@ import net.minecraft.server.level.ServerPlayer;
 import java.util.UUID;
 
 /**
- * Permission checks on Forge: LuckPerms when it is installed, the node's
- * declared default otherwise.
+ * Permission checks on Forge: the PermissionAPI when a permission mod
+ * handles it, LuckPerms asked directly for what the PermissionAPI cannot
+ * answer, the node's declared default otherwise.
  * <p>
  * Every place CoffeeLib checks a permission on this platform goes through
  * here - annotated commands, {@code /coffeelib}'s own subcommands, and
@@ -23,17 +23,8 @@ public final class ForgePermissions {
     private static final PermissionPlatform PLATFORM = new PermissionPlatform() {
         @Override
         public UUID playerId(Object subject) {
-            if (subject instanceof ServerPlayer player) {
-                return player.getUUID();
-            }
-            if (subject instanceof CommandSourceStack stack) {
-                ServerPlayer player = stack.getPlayer();
-                return player == null ? null : player.getUUID();
-            }
-            if (subject instanceof CommandSource source) {
-                return playerId(source.unwrap());
-            }
-            return null;
+            ServerPlayer player = player(subject);
+            return player == null ? null : player.getUUID();
         }
 
         @Override
@@ -51,12 +42,8 @@ public final class ForgePermissions {
         }
     };
 
-    /**
-     * The PermissionAPI when it has an answer (see {@link ForgePermissionBridge}),
-     * LuckPerms directly when it does not, the node default last.
-     */
     private static final PermissionResolver RESOLVER = new PermissionResolver(SharedPermissions.nodes(), PLATFORM,
-            LuckPermsBridge::check, ForgePermissionBridge::check);
+            ForgePermissionBridge::check, ForgeLuckPerms::check);
 
     private ForgePermissions() {
     }
@@ -75,5 +62,20 @@ public final class ForgePermissions {
             return operatorLevel <= 0 || PLATFORM.isOperator(subject, operatorLevel);
         }
         return RESOLVER.has(subject, node, operatorLevel);
+    }
+
+    /** The player behind {@code subject}: a player, a player's command source, or a CoffeeLib source wrapping one. */
+    static ServerPlayer player(Object subject) {
+        if (subject instanceof ServerPlayer player) {
+            return player;
+        }
+        if (subject instanceof CommandSourceStack stack) {
+            return stack.getPlayer();
+        }
+        if (subject instanceof CommandSource source) {
+            Object unwrapped = source.unwrap();
+            return unwrapped == source ? null : player(unwrapped);
+        }
+        return null;
     }
 }

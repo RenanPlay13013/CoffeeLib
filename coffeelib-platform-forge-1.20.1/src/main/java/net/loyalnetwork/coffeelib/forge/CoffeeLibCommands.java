@@ -59,10 +59,9 @@ final class CoffeeLibCommands {
     static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
         registerPlaceholderCommands(dispatcher);
         dispatcher.register(Commands.literal("coffeelib")
-                .requires(source -> allowed(source, CoffeeLibNodes.CONFIG_LIST)
-                        || allowed(source, CoffeeLibNodes.CONFIG_RELOAD)
-                        || allowed(source, CoffeeLibNodes.CONFIG_HOTRELOAD))
+                .requires(CoffeeLibCommands::anySubcommand)
                 .then(Commands.literal("config")
+                        .requires(CoffeeLibCommands::anyConfigSubcommand)
                         .then(Commands.literal("list")
                                 .requires(source -> allowed(source, CoffeeLibNodes.CONFIG_LIST))
                                 .executes(CoffeeLibCommands::list))
@@ -246,8 +245,9 @@ final class CoffeeLibCommands {
      */
     private static void registerPlaceholderCommands(CommandDispatcher<CommandSourceStack> dispatcher) {
         dispatcher.register(Commands.literal("coffeelib")
-                .requires(source -> allowed(source, CoffeeLibNodes.PLACEHOLDER))
+                .requires(CoffeeLibCommands::anySubcommand)
                 .then(Commands.literal("placeholder")
+                        .requires(source -> allowed(source, CoffeeLibNodes.PLACEHOLDER))
                         .then(Commands.literal("list")
                                 .executes(context -> {
                                     java.util.Set<String> namespaces = SharedPlaceholders.namespaces();
@@ -278,6 +278,24 @@ final class CoffeeLibCommands {
      */
     private static boolean allowed(CommandSourceStack source, String node) {
         return ForgePermissions.check(source, node, 2);
+    }
+
+    /**
+     * The requirement on the {@code /coffeelib} root: any of its subcommands.
+     * <p>
+     * Both trees register that root, and Brigadier merges them into one node
+     * that keeps the requirement of whichever was registered first - so each
+     * registration must give the root this same requirement, and the
+     * subcommands' own nodes go on their own literals.
+     */
+    private static boolean anySubcommand(CommandSourceStack source) {
+        return anyConfigSubcommand(source) || allowed(source, CoffeeLibNodes.PLACEHOLDER);
+    }
+
+    private static boolean anyConfigSubcommand(CommandSourceStack source) {
+        return allowed(source, CoffeeLibNodes.CONFIG_LIST)
+                || allowed(source, CoffeeLibNodes.CONFIG_RELOAD)
+                || allowed(source, CoffeeLibNodes.CONFIG_HOTRELOAD);
     }
 
     private static Component info(String message) {

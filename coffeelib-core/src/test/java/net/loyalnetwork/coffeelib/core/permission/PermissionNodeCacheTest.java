@@ -26,7 +26,7 @@ class PermissionNodeCacheTest {
     void theFileStartsWithAHeaderSayingWhyItExists(@TempDir Path dir) throws IOException {
         PermissionNodeCache cache = new PermissionNodeCache(dir.resolve("coffeelib").resolve("permission-nodes.cache"));
 
-        cache.append(node("crates.reset", "cratesmod"));
+        cache.record(node("crates.reset", "cratesmod"));
 
         String content = Files.readString(cache.file());
         assertTrue(content.startsWith("# CoffeeLib permission node cache"), content);
@@ -39,9 +39,9 @@ class PermissionNodeCacheTest {
     void entriesRoundTripAndAreNotDuplicated(@TempDir Path dir) {
         PermissionNodeCache cache = new PermissionNodeCache(dir.resolve("permission-nodes.cache"));
 
-        cache.append(node("crates.reset", "cratesmod"));
-        cache.append(node("crates.reset", "cratesmod"));
-        cache.append(new PermissionNodes.NodeInfo("crates.open", "cratesmod", PermissionDefault.EVERYONE, 2, ""));
+        cache.record(node("crates.reset", "cratesmod"));
+        cache.record(node("crates.reset", "cratesmod"));
+        cache.record(new PermissionNodes.NodeInfo("crates.open", "cratesmod", PermissionDefault.EVERYONE, 2, ""));
 
         Map<String, PermissionNodes.NodeInfo> read = cache.read();
         assertEquals(2, read.size(), "declaring late twice records it once");
@@ -50,10 +50,39 @@ class PermissionNodeCacheTest {
     }
 
     @Test
+    void reRecordingANodeWithOtherValuesReplacesItsEntry(@TempDir Path dir) throws IOException {
+        PermissionNodeCache cache = new PermissionNodeCache(dir.resolve("permission-nodes.cache"));
+        cache.record(node("crates.reset", "cratesmod"));
+        cache.record(new PermissionNodes.NodeInfo("crates.open", "cratesmod", PermissionDefault.EVERYONE, 2, ""));
+
+        cache.record(new PermissionNodes.NodeInfo("crates.reset", "cratesmod", PermissionDefault.NOBODY, 2, "Locked"));
+
+        Map<String, PermissionNodes.NodeInfo> read = cache.read();
+        assertEquals(PermissionDefault.NOBODY, read.get("crates.reset").def());
+        assertEquals("Locked", read.get("crates.reset").description());
+        assertEquals(2, read.size(), "the other entry is kept");
+        assertTrue(Files.readString(cache.file()).startsWith("# CoffeeLib"));
+    }
+
+    @Test
+    void aDescriptionWithATabIsNotRewrittenOnEveryRecord(@TempDir Path dir) throws IOException {
+        PermissionNodeCache cache = new PermissionNodeCache(dir.resolve("permission-nodes.cache"));
+        PermissionNodes.NodeInfo info = new PermissionNodes.NodeInfo("crates.give", "cratesmod",
+                PermissionDefault.OPERATORS, 2, "Give	a crate");
+        cache.record(info);
+        Files.setLastModifiedTime(cache.file(), java.nio.file.attribute.FileTime.fromMillis(0));
+
+        cache.record(info);
+
+        assertEquals(0, Files.getLastModifiedTime(cache.file()).toMillis(), "unchanged, so not rewritten");
+        assertEquals("Give a crate", cache.read().get("crates.give").description());
+    }
+
+    @Test
     void entriesOfModsThatAreGoneArePruned(@TempDir Path dir) throws IOException {
         PermissionNodeCache cache = new PermissionNodeCache(dir.resolve("permission-nodes.cache"));
-        cache.append(node("crates.reset", "cratesmod"));
-        cache.append(node("old.thing", "removedmod"));
+        cache.record(node("crates.reset", "cratesmod"));
+        cache.record(node("old.thing", "removedmod"));
 
         List<PermissionNodes.NodeInfo> kept = cache.prune(info -> !info.ownerId().equals("removedmod"));
 
@@ -95,12 +124,14 @@ class PermissionNodeCacheTest {
             }
         };
 
-        PermissionResolver apiSaysYes = new PermissionResolver(nodes, platform,
-                (id, node) -> false, (subject, node) -> true);
-        PermissionResolver apiHasNoAnswer = new PermissionResolver(nodes, platform,
-                (id, node) -> true, (subject, node) -> null);
-        PermissionResolver nothingAnswers = new PermissionResolver(nodes, platform,
-                (id, node) -> null, (subject, node) -> null);
+        PermissionSource platformApi = (subject, id, node) -> true;
+        PermissionSource noAnswer = (subject, id, node) -> null;
+        PermissionSource luckPermsSaysNo = (subject, id, node) -> false;
+        PermissionSource luckPermsSaysYes = (subject, id, node) -> true;
+
+        PermissionResolver apiSaysYes = new PermissionResolver(nodes, platform, platformApi, luckPermsSaysNo);
+        PermissionResolver apiHasNoAnswer = new PermissionResolver(nodes, platform, noAnswer, luckPermsSaysYes);
+        PermissionResolver nothingAnswers = new PermissionResolver(nodes, platform, noAnswer, noAnswer);
 
         assertTrue(apiSaysYes.has("player", "crates.give"), "the handler decides first");
         assertTrue(apiHasNoAnswer.has("player", "crates.give"), "a late node: LuckPerms directly");
@@ -122,7 +153,7 @@ class PermissionNodeCacheTest {
                 return level <= 2;
             }
         };
-        PermissionResolver resolver = new PermissionResolver(nodes, level2, (id, node) -> null);
+        PermissionResolver resolver = new PermissionResolver(nodes, level2);
 
         assertFalse(resolver.has("op2", "server.reset"), "an op at level 2 is not enough for a level-4 node");
     }
