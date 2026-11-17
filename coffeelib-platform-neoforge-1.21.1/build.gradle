@@ -84,6 +84,12 @@ dependencies {
     // module", so a managed-format config works in a dev run too.
     additionalRuntimeClasspath(project(":coffeelib-core"))
 
+    // The database module, as its shadow jar: its classes plus HikariCP and the drivers,
+    // already relocated. Bundled like core; compiled against for CoffeeLib.database().
+    compileOnly(project(path: ':coffeelib-database', configuration: 'shadowRuntimeElements'))
+    bundled(project(path: ':coffeelib-database', configuration: 'shadowRuntimeElements'))
+    additionalRuntimeClasspath(project(path: ':coffeelib-database', configuration: 'shadowRuntimeElements'))
+
     // LuckPerms is optional: its API is called directly when LuckPerms is installed
     // (permission/*LuckPerms.java), so it is needed to compile and nowhere else - the
     // LuckPerms mod brings the API classes itself. 5.4 is the oldest API the supported

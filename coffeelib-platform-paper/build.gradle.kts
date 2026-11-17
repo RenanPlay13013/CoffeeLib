@@ -51,6 +51,11 @@ dependencies {
         exclude(group = "com.google.code.gson")
     }
 
+    // The database module, as its shadow jar: its classes plus HikariCP and the drivers,
+    // already relocated. Bundled like core; compiled against for CoffeeLib.database().
+    compileOnly(project(path = ":coffeelib-database", configuration = "shadowRuntimeElements"))
+    bundled(project(path = ":coffeelib-database", configuration = "shadowRuntimeElements"))
+
     // The YAML engine (Configurate) now lives in core alongside the JSON and HOCON
     // backends, so every platform shares one implementation per format instead of
     // Paper keeping its own copy.

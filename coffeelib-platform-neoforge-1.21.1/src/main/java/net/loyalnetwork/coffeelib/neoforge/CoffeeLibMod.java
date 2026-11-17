@@ -2,6 +2,7 @@ package net.loyalnetwork.coffeelib.neoforge;
 
 import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.event.GameShuttingDownEvent;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 
 /**
@@ -27,6 +28,10 @@ public final class CoffeeLibMod {
                 net.loyalnetwork.coffeelib.neoforge.permission.NeoForgePermissions.resolver()).declare(net.loyalnetwork.coffeelib.core.permission.CoffeeLibNodes.class);
         // The game bus, not the mod bus: RegisterCommandsEvent fires per server start.
         NeoForge.EVENT_BUS.addListener(RegisterCommandsEvent.class, this::onRegisterCommands);
+        // Every mod's databases, when the game exits: the pools' connections are released
+        // on the database server rather than left for it to time out.
+        NeoForge.EVENT_BUS.addListener(GameShuttingDownEvent.class,
+                event -> net.loyalnetwork.coffeelib.database.OpenDatabases.closeAll());
     }
 
     private void onRegisterCommands(RegisterCommandsEvent event) {

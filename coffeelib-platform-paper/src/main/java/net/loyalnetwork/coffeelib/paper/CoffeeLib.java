@@ -4,7 +4,9 @@ import net.loyalnetwork.coffeelib.api.config.ConfigFormat;
 import net.loyalnetwork.coffeelib.api.config.ReloadableConfigManager;
 import net.loyalnetwork.coffeelib.api.command.CommandManager;
 import net.loyalnetwork.coffeelib.api.event.EventBus;
+import net.loyalnetwork.coffeelib.api.database.DatabaseManager;
 import net.loyalnetwork.coffeelib.api.permission.PermissionManager;
+import net.loyalnetwork.coffeelib.database.DefaultDatabaseManager;
 import net.loyalnetwork.coffeelib.paper.permission.PaperPermissionManager;
 import net.loyalnetwork.coffeelib.api.placeholder.PlaceholderManager;
 import net.loyalnetwork.coffeelib.paper.placeholder.PaperPlaceholderManager;
@@ -87,6 +89,29 @@ public final class CoffeeLib {
      */
     public static PermissionManager permissions(JavaPlugin plugin) {
         return new PaperPermissionManager(plugin);
+    }
+
+    /**
+     * Databases for {@code plugin}: {@code open()} connects with the plugin's
+     * {@code database.yml} (in its data folder), {@code open(settings)} with
+     * settings of its own. Opened databases are closed when the plugin is
+     * disabled, after its {@code onDisable} has run.
+     */
+    public static DatabaseManager database(JavaPlugin plugin) {
+        return database(plugin, null);
+    }
+
+    /**
+     * {@link #database(JavaPlugin)}, with {@code database.yml} in
+     * {@code configDirectory} instead - the same choice
+     * {@link #forPlugin(JavaPlugin, Path)} offers for configs.
+     *
+     * @param configDirectory where {@code database.yml} lives, or {@code null}
+     *                        for the plugin's data folder
+     */
+    public static DatabaseManager database(JavaPlugin plugin, Path configDirectory) {
+        return new DefaultDatabaseManager(plugin.getName(), () -> forPlugin(plugin, configDirectory),
+                plugin.getClass().getClassLoader());
     }
 
     /**

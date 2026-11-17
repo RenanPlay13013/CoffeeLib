@@ -88,6 +88,13 @@ dependencies {
         exclude group: 'com.google.code.gson'
     }
 
+    // Dev runs need it on the Minecraft runtime classpath for the same reason as core.
+    // The database module, as its shadow jar: its classes plus HikariCP and the drivers,
+    // already relocated. Bundled like core; compiled against for CoffeeLib.database().
+    compileOnly(project(path: ':coffeelib-database', configuration: 'shadowRuntimeElements'))
+    bundled(project(path: ':coffeelib-database', configuration: 'shadowRuntimeElements'))
+    minecraftLibrary(project(path: ':coffeelib-database', configuration: 'shadowRuntimeElements'))
+
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
 
     // LuckPerms is optional: its API is called directly when LuckPerms is installed

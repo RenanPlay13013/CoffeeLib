@@ -1,7 +1,9 @@
 package net.loyalnetwork.coffeelib.forge;
 
 import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.event.GameShuttingDownEvent;
 import net.minecraftforge.event.RegisterCommandsEvent;
+import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.fml.common.Mod;
 
 /**
@@ -27,6 +29,10 @@ public final class CoffeeLibMod {
                 net.loyalnetwork.coffeelib.forge.permission.ForgePermissions.resolver()).declare(net.loyalnetwork.coffeelib.core.permission.CoffeeLibNodes.class);
         // The game bus, not the mod bus: RegisterCommandsEvent fires per server start.
         MinecraftForge.EVENT_BUS.addListener(this::onRegisterCommands);
+        // Every mod's databases, when the game exits: the pools' connections are released
+        // on the database server rather than left for it to time out.
+        MinecraftForge.EVENT_BUS.addListener(EventPriority.NORMAL, false, GameShuttingDownEvent.class,
+                event -> net.loyalnetwork.coffeelib.database.OpenDatabases.closeAll());
     }
 
     private void onRegisterCommands(RegisterCommandsEvent event) {

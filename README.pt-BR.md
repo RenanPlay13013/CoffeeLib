@@ -38,6 +38,9 @@ compartilhado entre donos na mesma JVM.
 - **Event bus próprio** — um canal compartilhado por todos os mods e plugins da
   lib, com prioridades, cancelamento e handlers `@Subscribe`, para dois donos
   conversarem por tipos Java simples em vez de eventos do Forge ou do Bukkit.
+- **MySQL, MariaDB e PostgreSQL** — uma conexão em pool (HikariCP) por mod ou
+  plugin, configurada por um `database.yml`, com helpers JDBC assíncronos e um
+  `DataSource` comum para Hibernate, jOOQ ou o que vier por cima.
 - **Integração real com plataformas** — Forge e NeoForge se integram com seus
   sistemas nativos de config, então `/forge config` e o ConfigTracker enxergam
   de verdade.
@@ -56,11 +59,12 @@ compartilhado entre donos na mesma JVM.
 
 ## Arquitetura
 
-O CoffeeLib é dividido em cinco módulos sob `net.loyalnetwork`:
+O CoffeeLib é dividido em seis módulos sob `net.loyalnetwork`:
 
 ```
 coffeelib-api                    interfaces, anotações, exceções (sem dependências)
 coffeelib-core                   implementações agnósticas de plataforma (Java puro)
+coffeelib-database               pools de conexão, com HikariCP e os drivers relocados dentro
 coffeelib-platform-paper         backend Paper (Configurate YAML)
 coffeelib-platform-forge-1.20.1  integração Forge 1.20.1 (Java 17)
 coffeelib-platform-neoforge-1.21.1 integração NeoForge 1.21.1 (Java 21)
@@ -91,15 +95,15 @@ repositories {
 
 dependencies {
     // Paper
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-paper:3.4")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-paper:3.5")
     // Forge 1.20.1
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-forge-1.20.1:3.4")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-forge-1.20.1:3.5")
     // NeoForge 1.21.1
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-neoforge-1.21.1:3.4")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-neoforge-1.21.1:3.5")
     // Ou apenas o core agnóstico de formato (config + DI, sem backend de plataforma)
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-core:3.4")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-core:3.5")
     // Ou só as interfaces e anotações
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-api:3.4")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-api:3.5")
 }
 ```
 
@@ -704,6 +708,101 @@ Onde o CoffeeLib passou a checar nós:
   `coffeelib.config.list`, `coffeelib.config.reload`,
   `coffeelib.config.hotreload` e `coffeelib.placeholder`, todos com default de
   operador — então um servidor pode dar reload de config à staff sem dar op.
+
+---
+
+## Banco de dados
+
+Um pool de conexões por mod ou plugin, para **MySQL**, **MariaDB** e
+**PostgreSQL**. A parte da CoffeeLib termina num `DataSource` JDBC comum: use os
+helpers pequenos dela para SQL, ou coloque Hibernate, jOOQ ou JDBI por cima.
+Nada para adicionar ao seu build: o HikariCP e os drivers vêm dentro dos jars de
+plataforma, relocados em `net.loyalnetwork.coffeelib.libs`, então não conflitam
+com a cópia que outro mod ou plugin traga.
+
+```java
+DatabaseManager databases = CoffeeLib.database(container);   // Forge: database(), Paper: database(this)
+Database db = databases.open();                                // a partir do database.yml
+
+db.update("CREATE TABLE IF NOT EXISTS crates (player VARCHAR(36) PRIMARY KEY, opened INT)");
+
+db.queryFirst("SELECT opened FROM crates WHERE player = ?", rs -> rs.getInt(1), uuid.toString())
+  .thenAccept(opened -> ...);                                  // Optional<Integer>, fora da thread do servidor
+
+db.transaction(connection -> { ... });                         // commit ao retornar, rollback ao lançar
+```
+
+* **Todo helper roda nas threads do próprio banco** (`CoffeeLib-DB-<dono>-N`,
+  uma por conexão do pool) e devolve um `CompletableFuture`, nunca bloqueando a
+  thread do servidor. Volte para ela pelo scheduler da sua plataforma antes de
+  mexer no mundo. Falhas completam o future com uma `DatabaseException` que traz
+  a mensagem do driver.
+* **`open()` conecta na hora**, então configuração errada falha na subida com o
+  motivo ("Access denied...", "Connection refused...") e o arquivo a corrigir.
+* **Fechado para você**: no Paper quando o plugin é desabilitado (depois do
+  `onDisable` dele, que ainda pode salvar ali); no Forge e no NeoForge quando o
+  jogo fecha. `db.close()` fecha um antes.
+
+O arquivo, criado com defaults no primeiro uso (`config/<modid>/database.yml`
+no Forge/NeoForge, a pasta de dados do plugin no Paper):
+
+```yaml
+# MYSQL, MARIADB or POSTGRESQL
+type: MYSQL
+host: localhost
+# 0 = the type's usual port (3306 for MySQL/MariaDB, 5432 for PostgreSQL)
+port: 0
+database: minecraft
+username: minecraft
+# Any value here may be ${NAME} to read the environment variable NAME instead
+password: ${CRATES_DB_PASSWORD}
+poolSize: 10
+connectionTimeoutMillis: 10000
+properties: {}
+jdbcUrl: ''
+```
+
+O `database.yml` pode ficar em outro lugar, como qualquer config: passe um
+diretório, como em `CoffeeLib.database(container, Path.of("databases/crates"))`
+(Forge: `database(dir)`, Paper: `database(this, dir)`); `null` mantém o padrão.
+
+Configurações próprias (guardadas na sua config, ou montadas em código) vão por
+`databases.open(DatabaseSettings.builder(DatabaseType.POSTGRESQL).host(...)...build())`.
+`properties` vão para o driver como estão: `sslMode: verify-full` no
+MySQL/MariaDB, `sslmode: verify-full` no PostgreSQL, e assim por diante.
+
+> **MySQL 8 sem TLS.** O MySQL 8 autentica com `caching_sha2_password`, que numa
+> conexão sem TLS precisa da chave RSA do servidor. A menos que você configure
+> `sslMode` (ou o próprio `allowPublicKeyRetrieval`), a CoffeeLib deixa o driver
+> buscá-la, então uma instalação padrão conecta. Para um banco numa rede que
+> não é confiável, configure `sslMode`.
+
+### Usando Hibernate (ou outro JPA/ORM)
+
+A CoffeeLib não embute o Hibernate (ele é grande, e a maioria dos mods nunca
+precisa dele), mas ele roda no pool da CoffeeLib como está. Embuta o Hibernate
+no seu próprio jar (com `jarJar` no Forge/NeoForge, com shade no Paper) e
+entregue o `DataSource` a ele:
+
+```java
+Database db = CoffeeLib.database(container).open();
+
+Configuration configuration = new Configuration()
+        .addAnnotatedClass(CrateKey.class)
+        .setProperty(AvailableSettings.HBM2DDL_AUTO, "update");
+configuration.getProperties().put(AvailableSettings.DATASOURCE, db.dataSource());   // o pool da CoffeeLib
+SessionFactory sessions = configuration.buildSessionFactory();
+
+db.executor().execute(() -> sessions.inTransaction(session -> session.persist(new CrateKey(...))));
+```
+
+* Deixe o Hibernate detectar o dialeto pela conexão, ou defina
+  `hibernate.dialect` como `MySQLDialect`, `MariaDBDialect` ou
+  `PostgreSQLDialect`.
+* Rode as sessions em `db.executor()` (ou em threads suas), não na thread do
+  servidor. O context class loader dessas threads é o do seu mod ou plugin, que
+  é por onde o Hibernate encontra as suas classes de entidade.
+* Feche o `SessionFactory` antes do banco (no `onDisable`, no Paper).
 
 ---
 

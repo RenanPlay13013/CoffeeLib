@@ -4,7 +4,9 @@ import net.loyalnetwork.coffeelib.api.config.ConfigFormat;
 import net.loyalnetwork.coffeelib.api.config.ReloadableConfigManager;
 import net.loyalnetwork.coffeelib.api.command.CommandManager;
 import net.loyalnetwork.coffeelib.api.event.EventBus;
+import net.loyalnetwork.coffeelib.api.database.DatabaseManager;
 import net.loyalnetwork.coffeelib.api.permission.PermissionManager;
+import net.loyalnetwork.coffeelib.database.DefaultDatabaseManager;
 import net.loyalnetwork.coffeelib.core.permission.DefaultPermissionManager;
 import net.loyalnetwork.coffeelib.neoforge.permission.NeoForgePermissions;
 import net.loyalnetwork.coffeelib.api.placeholder.PlaceholderManager;
@@ -163,6 +165,43 @@ public final class CoffeeLib {
     /** {@link PermissionManager} for {@code modId}. */
     public static PermissionManager permissions(String modId) {
         return new DefaultPermissionManager(modId, NeoForgePermissions.resolver());
+    }
+
+    /**
+     * Databases for {@code container}'s mod: {@code open()} connects with
+     * {@code config/<modid>/database.yml}, {@code open(settings)} with
+     * settings of its own. Opened databases are closed when the game exits.
+     */
+    public static DatabaseManager database(ModContainer container) {
+        return database(container.getModId(), null);
+    }
+
+    /** {@link #database(ModContainer)}, with {@code database.yml} in {@code configDirectory} ({@code null}: the default). */
+    public static DatabaseManager database(ModContainer container, Path configDirectory) {
+        return database(container.getModId(), configDirectory);
+    }
+
+    /** {@link DatabaseManager} for {@code modId}. */
+    public static DatabaseManager database(String modId) {
+        return database(modId, null);
+    }
+
+    /**
+     * {@link #database(String)}, with {@code database.yml} in
+     * {@code configDirectory} instead - the same choice
+     * {@link #detached(String, Path)} offers for configs.
+     *
+     * @param configDirectory where {@code database.yml} lives, or {@code null}
+     *                        for {@code config/<modid>/}
+     */
+    public static DatabaseManager database(String modId, Path configDirectory) {
+        // By default database.yml goes in config/<modid>/: every mod has one, so the
+        // loader's own config/ would have them all overwrite each other. Every mod's
+        // classes are visible from the loader that loaded CoffeeLib's own.
+        return new DefaultDatabaseManager(modId,
+                () -> detached(modId, configDirectory != null ? configDirectory
+                        : FMLPaths.CONFIGDIR.get().resolve(modId)),
+                CoffeeLib.class.getClassLoader());
     }
 
     public static EventBus eventBus(ModContainer container) {
