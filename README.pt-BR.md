@@ -468,13 +468,57 @@ para agir sobre o evento.
   toque o estado do servidor precisa ir para a thread certa do jeito que
   aquela plataforma espera.
 * Um handler que lança exceção é registrado no log em nome do dono dele e
-  pulado; os handlers seguintes rodam normalmente, e nada disso vaza para quem
-  publicou. O bug de um mod não quebra os handlers de outro.
+  pulado; os handlers seguintes rodam normalmente, e o `post` não informa nada a
+  quem publicou. O bug de um mod não quebra os handlers de outro. Isso vale para
+  **qualquer coisa que um handler possa lançar** — exceção, `AssertionError`,
+  `NoClassDefFoundError` de uma classe que outro mod não trouxe — e para
+  **as duas** formas de registrar, lambda ou `@Subscribe` (na 3.3 e anteriores
+  um `AssertionError` escapava de uma lambda mas não de um método anotado). A
+  única coisa que passa são os erros fatais da própria JVM, como
+  `OutOfMemoryError`, porque nada depois deles é confiável.
 * `bus.unregisterAll()` remove tudo que o seu dono registrou. Vale chamar
   quando o seu dono vai embora: handlers seguram seus objetos e, por eles, seu
   class loader. No Paper isso é automático — o plugin do CoffeeLib limpa os
   handlers de um plugin quando ele é desabilitado, então um `/reload` não
   deixa a cópia antiga das suas classes respondendo eventos.
+
+### Saber se deu certo
+
+O `post` serve para notificações, em que ninguém a jusante pode quebrar quem
+publica. Ele não serve para um publicador que está **coordenando trabalho** —
+"entregue a recompensa, *depois* marque a sessão como concluída" — porque volta
+normalmente tenham todos os handlers funcionado ou não. Para isso o `dispatch` é
+a mesma entrega com o resultado devolvido:
+
+```java
+EventResult<RewardDelivery> result = bus.dispatch(new RewardDelivery(player, reward));
+
+if (result.hasFailures()) {
+    desfazer(player);              // quem publica decide o que uma falha significa
+} else {
+    session.complete();
+}
+```
+
+O `EventResult` traz o evento, `handlersInvoked()` e `failures()` — cada uma um
+`EventFailure(ownerId, handlerEventType, cause)`, com `cause` exatamente como o
+handler lançou, nunca embrulhada. Prefira uma exceção no ponto que você escolher
+a conferir um flag:
+
+```java
+bus.dispatch(event).throwIfFailed();   // EventDispatchException; a primeira falha é a
+                                       // causa, as demais ficam como suppressed
+```
+
+`dispatch(event, FailurePolicy.STOP)` para no primeiro erro em vez de rodar todos
+os handlers, para quando um handler posterior depende do trabalho de um anterior
+e agir sobre um estado pela metade seria pior do que não agir.
+
+> **Não existe rollback.** Um evento é um objeto comum. Um handler que cancelou
+> ou alterou um campo e *depois* falhou deixa o evento cancelado ou alterado — o
+> bus não tem transação para desfazer. O `dispatch` é como o publicador descobre
+> que precisa limpar; a limpeza é trabalho dele. As falhas são registradas no
+> log de qualquer forma.
 
 > **Uma cópia do CoffeeLib, ou não existe canal compartilhado.** A entrega
 > entre donos só funciona enquanto todos carregam as mesmas classes do

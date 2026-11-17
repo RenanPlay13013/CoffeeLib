@@ -461,13 +461,55 @@ than for acting on the event.
   hand-off, so a slow handler blocks the poster, and anything touching server
   state has to get itself onto the right thread the way its platform expects.
 * A handler that throws is logged against its owner and skipped; the handlers
-  after it still run, and nothing surfaces in whoever posted. One mod's bug
-  cannot break another's handlers.
+  after it still run, and `post` reports nothing to whoever posted. One mod's
+  bug cannot break another's handlers. That covers **anything a handler can
+  throw** — an exception, an `AssertionError`, a `NoClassDefFoundError` from a
+  class another mod did not ship — and **both** ways of registering one, lambda
+  or `@Subscribe` (in 3.3 and earlier an `AssertionError` escaped a lambda but
+  not an annotated method). The only thing let through is the JVM's own fatal
+  errors, such as `OutOfMemoryError`, because nothing after them can be trusted.
 * `bus.unregisterAll()` drops everything your owner registered. Worth calling
   when your owner goes away: handlers hold your objects, and through them your
   class loader. On Paper this is automatic — the CoffeeLib plugin clears a
   plugin's handlers when it is disabled, so a `/reload` cannot leave the old
   copy of your classes answering events.
+
+### Knowing whether it worked
+
+`post` suits notifications, where nobody downstream should be able to break the
+sender. It does not suit a publisher that is **coordinating work** — "deliver
+the reward, *then* mark the session complete" — because it returns normally
+whether every handler succeeded or not. For that, `dispatch` is the same
+delivery with the outcome handed back:
+
+```java
+EventResult<RewardDelivery> result = bus.dispatch(new RewardDelivery(player, reward));
+
+if (result.hasFailures()) {
+    rollBack(player);              // the publisher decides what a failure means
+} else {
+    session.complete();
+}
+```
+
+`EventResult` has the event, `handlersInvoked()`, and `failures()` — each an
+`EventFailure(ownerId, handlerEventType, cause)`, with `cause` exactly as the
+handler threw it, never wrapped. Prefer an exception at the point you choose
+over checking a flag:
+
+```java
+bus.dispatch(event).throwIfFailed();   // EventDispatchException; first failure is the
+                                       // cause, the rest are suppressed
+```
+
+`dispatch(event, FailurePolicy.STOP)` halts at the first failure instead of
+running every handler, for when a later handler builds on an earlier one's work
+and acting on a half-done state would be worse than not acting.
+
+> **There is no rollback.** An event is a plain object. A handler that cancelled
+> it or changed a field and *then* failed leaves it cancelled or changed — the
+> bus has no transaction to undo. `dispatch` is how a publisher learns it must
+> clean up; the cleaning up is its own job. Failures are logged either way.
 
 > **One copy of CoffeeLib, or no shared channel.** Delivery between owners only
 > works while they all load the same CoffeeLib classes. Install it as its own

@@ -2,7 +2,9 @@ package net.loyalnetwork.coffeelib.core.event;
 
 import net.loyalnetwork.coffeelib.api.event.EventBus;
 import net.loyalnetwork.coffeelib.api.event.EventPriority;
+import net.loyalnetwork.coffeelib.api.event.EventResult;
 import net.loyalnetwork.coffeelib.api.event.EventSubscription;
+import net.loyalnetwork.coffeelib.api.event.FailurePolicy;
 
 import java.util.function.Consumer;
 
@@ -50,6 +52,8 @@ public final class DefaultEventBus implements EventBus {
     public <T> EventSubscription subscribe(Class<T> eventType, EventPriority priority, Consumer<? super T> handler) {
         EventRegistry.Handler registered = registry.subscribe(ownerId, eventType, priority, false, null,
                 event -> ((Consumer<Object>) handler).accept(event));
+        // The lambda above is an Invoker, which may throw anything: a handler's failure reaches
+        // the dispatcher as it was thrown, the same as an @Subscribe method's does.
         return new Subscription(registry, registered);
     }
 
@@ -70,8 +74,18 @@ public final class DefaultEventBus implements EventBus {
 
     @Override
     public <T> T post(T event) {
-        registry.post(event);
+        registry.dispatch(event, FailurePolicy.CONTINUE);
         return event;
+    }
+
+    @Override
+    public <T> EventResult<T> dispatch(T event) {
+        return registry.dispatch(event, FailurePolicy.CONTINUE);
+    }
+
+    @Override
+    public <T> EventResult<T> dispatch(T event, FailurePolicy policy) {
+        return registry.dispatch(event, policy);
     }
 
     /** How many handlers this owner currently has. Handy in tests and when debugging a leak. */

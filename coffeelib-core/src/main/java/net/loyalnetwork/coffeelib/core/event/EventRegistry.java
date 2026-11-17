@@ -1,7 +1,10 @@
 package net.loyalnetwork.coffeelib.core.event;
 
 import net.loyalnetwork.coffeelib.api.event.Cancellable;
+import net.loyalnetwork.coffeelib.api.event.EventFailure;
 import net.loyalnetwork.coffeelib.api.event.EventPriority;
+import net.loyalnetwork.coffeelib.api.event.EventResult;
+import net.loyalnetwork.coffeelib.api.event.FailurePolicy;
 import net.loyalnetwork.coffeelib.api.event.annotation.Subscribe;
 import net.loyalnetwork.coffeelib.api.event.exception.EventException;
 
@@ -14,7 +17,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -46,8 +48,28 @@ final class EventRegistry {
     /** Registration counter, so handlers of equal priority keep registration order. */
     private long sequence;
 
+    /**
+     * What a handler is, to the dispatcher: something that takes the event and
+     * may throw anything.
+     * <p>
+     * It is not a {@code Consumer} because a {@code Consumer} cannot throw a
+     * checked exception, and a reflective {@code @Subscribe} call can: its
+     * method may declare {@code throws Exception}. Forcing that through a
+     * {@code Consumer} meant wrapping the failure in an {@code EventException},
+     * which is what made the two ways of registering a handler treat the same
+     * error differently - a lambda's {@code AssertionError} sailed past the
+     * dispatcher while an annotated method's was wrapped into something the
+     * dispatcher happened to catch. Declaring {@code throws Throwable} here lets
+     * both routes hand the failure over exactly as thrown, and gives the
+     * dispatcher one place to decide what counts as one.
+     */
+    @FunctionalInterface
+    interface Invoker {
+        void invoke(Object event) throws Throwable;
+    }
+
     <T> Handler subscribe(String ownerId, Class<T> eventType, EventPriority priority,
-                          boolean receiveCancelled, Object listener, Consumer<Object> invoker) {
+                          boolean receiveCancelled, Object listener, Invoker invoker) {
         Handler handler = new Handler(ownerId, eventType, priority, receiveCancelled, listener, invoker,
                 nextSequence());
         byEventType.computeIfAbsent(eventType, type -> new CopyOnWriteArrayList<>()).add(handler);
@@ -102,14 +124,19 @@ final class EventRegistry {
         }
     }
 
-    private static void invoke(Method method, Object listener, Object event) {
+    /**
+     * Calls an {@code @Subscribe} method and lets whatever it threw through as
+     * it was thrown. Reflection reports a thrown exception as an
+     * {@link InvocationTargetException} around it; unwrapping that - for
+     * everything, not only {@code RuntimeException} - is what makes a handler's
+     * failure the same thing however the handler was registered.
+     */
+    private static void invoke(Method method, Object listener, Object event) throws Throwable {
         try {
             method.invoke(listener, event);
         } catch (InvocationTargetException e) {
-            // Unwrap so the handler's own failure is what gets logged, not the reflection layer.
             Throwable cause = e.getCause();
-            throw cause instanceof RuntimeException runtime ? runtime : new EventException(
-                    "Handler '" + method.getName() + "' failed", cause);
+            throw cause != null ? cause : e;
         } catch (IllegalAccessException e) {
             throw new EventException("Could not call @Subscribe method '" + method.getName() + "'", e);
         }
@@ -145,27 +172,64 @@ final class EventRegistry {
 
     /**
      * Delivers {@code event} to every handler registered for its type or any
-     * supertype of it.
+     * supertype of it, and reports what happened.
      * <p>
-     * A handler that throws is logged and skipped; the rest still run. That is
-     * deliberate: handlers belong to different owners, and one mod's bug must
-     * not swallow another mod's events, nor propagate back into whoever posted.
+     * A handler that throws is logged and recorded, and with
+     * {@link FailurePolicy#CONTINUE} the rest still run. That is deliberate:
+     * handlers belong to different owners, and one mod's bug must not swallow
+     * another mod's events, nor propagate back into whoever posted. What counts
+     * as a failure is anything a handler throws, whichever way it was
+     * registered, except the JVM's own fatal errors (see {@link #isFatal}).
+     * <p>
+     * Handlers skipped for a cancelled event are not counted as invoked.
      */
-    void post(Object event) {
+    <T> EventResult<T> dispatch(T event, FailurePolicy policy) {
+        List<EventFailure> failures = new ArrayList<>();
+        int invoked = 0;
+
         for (Handler handler : resolve(event.getClass())) {
             if (event instanceof Cancellable cancellable
                     && cancellable.isCancelled()
                     && !handler.receiveCancelled()) {
                 continue;
             }
+
+            invoked++;
             try {
-                handler.invoker().accept(event);
-            } catch (RuntimeException | LinkageError e) {
+                handler.invoker().invoke(event);
+            } catch (Throwable thrown) {
+                if (isFatal(thrown)) {
+                    // Not a handler's bug to contain: the VM itself is in trouble, and nothing
+                    // after this can be trusted to run. Let it reach the poster.
+                    throw (VirtualMachineError) thrown;
+                }
+
                 LOGGER.log(Level.WARNING, "[CoffeeLib/" + handler.ownerId() + "] Event handler for "
                         + handler.eventType().getSimpleName() + " failed while handling "
-                        + event.getClass().getName(), e);
+                        + event.getClass().getName(), thrown);
+                failures.add(new EventFailure(handler.ownerId(), handler.eventType(), thrown));
+
+                if (policy == FailurePolicy.STOP) {
+                    break;
+                }
             }
         }
+
+        return new EventResult<>(event, invoked, failures);
+    }
+
+    /**
+     * {@code OutOfMemoryError} and the rest of {@link VirtualMachineError}: the
+     * runtime saying it cannot continue, as opposed to a handler saying it
+     * could not do its job.
+     * <p>
+     * {@link StackOverflowError} is the exception to the exception. It is a
+     * {@code VirtualMachineError} by ancestry, but it is a handler recursing
+     * into itself, which is exactly the buggy-handler case the isolation is
+     * for, and once the stack has unwound it is perfectly safe to carry on.
+     */
+    private static boolean isFatal(Throwable thrown) {
+        return thrown instanceof VirtualMachineError && !(thrown instanceof StackOverflowError);
     }
 
     /** How many handlers one owner currently has, for diagnostics. */
@@ -224,6 +288,6 @@ final class EventRegistry {
      * null for a lambda subscription, which is undone through its own handle.
      */
     record Handler(String ownerId, Class<?> eventType, EventPriority priority, boolean receiveCancelled,
-                   Object listener, Consumer<Object> invoker, long sequence) {
+                   Object listener, Invoker invoker, long sequence) {
     }
 }

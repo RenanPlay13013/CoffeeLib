@@ -38,7 +38,17 @@ import java.util.function.Consumer;
  * <p>
  * A handler that throws does not stop the ones after it: the failure is
  * logged, with the owner it belongs to, and delivery carries on. One mod
- * cannot break another's handlers by being broken itself.
+ * cannot break another's handlers by being broken itself. That holds for
+ * anything a handler can throw - exceptions, an {@code AssertionError}, a
+ * {@code LinkageError} from a class another mod did not ship - and for both
+ * ways of registering one; the only things not contained are the JVM's own
+ * fatal errors, such as {@code OutOfMemoryError}, which are rethrown to the
+ * poster because nothing after them can be trusted to run.
+ * <p>
+ * {@link #post(Object)} reports none of this to the caller, which suits
+ * notifications. A publisher that is coordinating work and has to know
+ * whether it all went through uses {@link #dispatch(Object)}, which returns
+ * what ran and what failed.
  * <p>
  * Implementations are thread-safe. Registering, unregistering and posting from
  * inside a handler are all allowed; a change made during delivery applies to
@@ -93,6 +103,34 @@ public interface EventBus {
     void unregisterAll();
 
     /**
+     * {@link #post(Object)} that tells the publisher how it went.
+     * <p>
+     * Delivery is the same - priority order, cancelled events skipped by the
+     * handlers that did not ask for them, every failure logged - but the
+     * outcome comes back instead of being discarded:
+     * <pre>{@code
+     * EventResult<RewardDelivery> result = bus.dispatch(new RewardDelivery(player, reward));
+     * if (result.hasFailures()) {
+     *     rollBack(player);          // the publisher decides what a failure means
+     * } else {
+     *     session.complete();
+     * }
+     * }</pre>
+     * Or let failures be exceptions at the point you choose:
+     * {@code bus.dispatch(event).throwIfFailed()}.
+     * <p>
+     * Equivalent to {@code dispatch(event, FailurePolicy.CONTINUE)}.
+     */
+    <T> EventResult<T> dispatch(T event);
+
+    /**
+     * {@link #dispatch(Object)} with an explicit {@link FailurePolicy}:
+     * {@code CONTINUE} runs every eligible handler and reports all the
+     * failures, {@code STOP} halts at the first one.
+     */
+    <T> EventResult<T> dispatch(T event, FailurePolicy policy);
+
+    /**
      * Delivers {@code event} to every matching handler, in priority order, and
      * returns it.
      * <p>
@@ -100,6 +138,9 @@ public interface EventBus {
      * call site: {@code if (!bus.post(new MyEvent()).isCancelled()) { ... }}.
      * Matching is by type, so a handler registered for a supertype (or an
      * interface) of {@code event} gets it too.
+     * <p>
+     * A handler that throws is logged and skipped, and nothing about it reaches
+     * the caller - see {@link #dispatch(Object)} when that matters.
      */
     <T> T post(T event);
 }
