@@ -4,6 +4,8 @@ import net.loyalnetwork.coffeelib.api.config.ConfigFormat;
 import net.loyalnetwork.coffeelib.api.config.ReloadableConfigManager;
 import net.loyalnetwork.coffeelib.api.command.CommandManager;
 import net.loyalnetwork.coffeelib.api.event.EventBus;
+import net.loyalnetwork.coffeelib.api.placeholder.PlaceholderManager;
+import net.loyalnetwork.coffeelib.paper.placeholder.PaperPlaceholderManager;
 import net.loyalnetwork.coffeelib.paper.commands.PaperCommandManager;
 import net.loyalnetwork.coffeelib.core.event.SharedEventBus;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -53,6 +55,26 @@ public final class CoffeeLib {
      */
     public static CommandManager commands(JavaPlugin plugin) {
         return new PaperCommandManager(plugin);
+    }
+
+    /**
+     * Placeholders for {@code plugin}, under its own name as the namespace
+     * ({@code %yourplugin_key%}). With PlaceholderAPI installed, the namespace
+     * is published there too, and {@link PlaceholderManager#apply} also fills
+     * in every other plugin's PlaceholderAPI placeholders. Dropped automatically
+     * when the plugin is disabled.
+     */
+    public static PlaceholderManager placeholders(JavaPlugin plugin) {
+        return placeholders(plugin, plugin.getName());
+    }
+
+    /**
+     * {@link #placeholders(JavaPlugin)} under a namespace of your choosing.
+     * Avoid {@code _} in it if other plugins should see it through
+     * PlaceholderAPI, which cuts identifiers at the first underscore.
+     */
+    public static PlaceholderManager placeholders(JavaPlugin plugin, String namespace) {
+        return new PaperPlaceholderManager(plugin, namespace);
     }
 
     /**

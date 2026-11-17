@@ -583,6 +583,52 @@ unsupported type, a missing provider, two methods for one path — fail at
 
 ---
 
+## Placeholders
+
+Register placeholders once and any mod or plugin on CoffeeLib can fill them in.
+On Paper that is what PlaceholderAPI already does; on Forge and NeoForge there
+is no common system, so CoffeeLib is the intermediary.
+
+```java
+public final class CratePlaceholders {
+
+    @Placeholder("keys")                  // %crates_keys% and %crates_keys_daily%
+    int keys(ServerPlayer player, String crate) { ... }
+
+    @Placeholder("total")                 // %crates_total%, no player needed
+    long total() { ... }
+}
+
+PlaceholderManager placeholders = CoffeeLib.placeholders(container);        // namespace = mod id
+PlaceholderManager placeholders = CoffeeLib.placeholders("mymod", "crates"); // or one you choose
+placeholders.register(new CratePlaceholders());
+placeholders.register("season", context -> currentSeason());
+
+String line = placeholders.apply(player, "You have %crates_keys% keys - %economy_balance%");
+```
+
+* **Syntax is PlaceholderAPI's**: `%namespace_key%`, `%namespace_key_argument%`,
+  so text written for Paper works unchanged elsewhere. The namespace is matched
+  against registered ones longest-first rather than cut at the first `_`, so a
+  mod id like `my_mod` works.
+* **`apply` fills in every namespace**, not just yours — that is how one mod
+  uses another's placeholders.
+* **Unknown, `null` or failing stays as written**: an unregistered placeholder,
+  a resolver returning `null` or throwing (logged against its owner), or one
+  declaring a player type when there is no such player is left in the text,
+  never replaced with something misleading. `50% off` is not a placeholder.
+* **Resolver parameters**, any order, all optional: the player in the platform's
+  type, a `String` for the argument, a `PlaceholderContext`.
+* **Paper with PlaceholderAPI**: each namespace is published as an expansion,
+  so plugins using PlaceholderAPI see yours, and `apply` also fills in theirs.
+  PlaceholderAPI is a soft dependency, never bundled. It cuts identifiers at the
+  first `_`, so keep `_` out of a namespace you want to publish there. A
+  plugin's placeholders and expansions are dropped when it is disabled.
+* Operators can check one with `/coffeelib placeholder list` and
+  `/coffeelib placeholder parse <text>` on Forge/NeoForge.
+
+---
+
 ## Platform integration
 
 Each platform exposes a tiny entry point that returns a `ConfigManager` bound

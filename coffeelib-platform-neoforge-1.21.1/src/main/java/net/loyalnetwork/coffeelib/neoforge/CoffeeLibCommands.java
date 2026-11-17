@@ -6,6 +6,7 @@ import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.suggestion.SuggestionProvider;
 import net.loyalnetwork.coffeelib.api.config.ConfigReloadService;
 import net.loyalnetwork.coffeelib.core.config.reload.ConfigReloadRegistry;
+import net.loyalnetwork.coffeelib.core.placeholder.SharedPlaceholders;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -54,6 +55,7 @@ final class CoffeeLibCommands {
     }
 
     static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
+        registerPlaceholderCommands(dispatcher);
         dispatcher.register(Commands.literal("coffeelib")
                 .requires(source -> source.hasPermission(2))
                 .then(Commands.literal("config")
@@ -228,6 +230,38 @@ final class CoffeeLibCommands {
     private static String describe(RuntimeException e) {
         String message = e.getMessage();
         return message != null ? message : e.getClass().getSimpleName();
+    }
+
+    /**
+     * {@code /coffeelib placeholder list|parse <text>}: which namespaces exist,
+     * and what a line comes out as for whoever runs it - the way to check a
+     * placeholder without writing a mod that prints it.
+     */
+    private static void registerPlaceholderCommands(CommandDispatcher<CommandSourceStack> dispatcher) {
+        dispatcher.register(Commands.literal("coffeelib")
+                .requires(source -> source.hasPermission(2))
+                .then(Commands.literal("placeholder")
+                        .then(Commands.literal("list")
+                                .executes(context -> {
+                                    java.util.Set<String> namespaces = SharedPlaceholders.namespaces();
+                                    if (namespaces.isEmpty()) {
+                                        context.getSource().sendSuccess(() -> info("No placeholders registered."), false);
+                                        return 0;
+                                    }
+                                    for (String namespace : namespaces) {
+                                        String keys = String.join(", ", SharedPlaceholders.registry().keysOf(namespace));
+                                        context.getSource().sendSuccess(() -> info("%" + namespace + "_...%: " + keys), false);
+                                    }
+                                    return namespaces.size();
+                                }))
+                        .then(Commands.literal("parse")
+                                .then(Commands.argument("text", StringArgumentType.greedyString())
+                                        .executes(context -> {
+                                            String text = StringArgumentType.getString(context, "text");
+                                            String parsed = SharedPlaceholders.apply(context.getSource().getPlayer(), text);
+                                            context.getSource().sendSuccess(() -> info(parsed), false);
+                                            return 1;
+                                        })))));
     }
 
     private static Component info(String message) {

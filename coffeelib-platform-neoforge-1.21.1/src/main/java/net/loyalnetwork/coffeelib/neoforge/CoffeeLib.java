@@ -4,6 +4,8 @@ import net.loyalnetwork.coffeelib.api.config.ConfigFormat;
 import net.loyalnetwork.coffeelib.api.config.ReloadableConfigManager;
 import net.loyalnetwork.coffeelib.api.command.CommandManager;
 import net.loyalnetwork.coffeelib.api.event.EventBus;
+import net.loyalnetwork.coffeelib.api.placeholder.PlaceholderManager;
+import net.loyalnetwork.coffeelib.core.placeholder.SharedPlaceholders;
 import net.loyalnetwork.coffeelib.neoforge.commands.NeoForgeCommandManager;
 import net.loyalnetwork.coffeelib.core.event.SharedEventBus;
 import net.neoforged.fml.ModContainer;
@@ -129,6 +131,21 @@ public final class CoffeeLib {
     /** {@link #commands(ModContainer)} for when only the mod id is at hand. */
     public static CommandManager commands(String modId) {
         return new NeoForgeCommandManager(modId);
+    }
+
+    /**
+     * Placeholders for {@code container}'s mod, under its mod id, registered as {@code %<namespace>_<key>%} in the
+     * registry every mod on CoffeeLib shares - the intermediary NeoForge does not
+     * have. {@link PlaceholderManager#apply} fills in any mod's placeholders,
+     * not just your own.
+     */
+    public static PlaceholderManager placeholders(ModContainer container) {
+        return placeholders(container.getModId(), container.getModId());
+    }
+
+    /** Placeholders for {@code modId} under a namespace of its own choosing, e.g. {@code "crates"}. */
+    public static PlaceholderManager placeholders(String modId, String namespace) {
+        return SharedPlaceholders.forOwner(modId, namespace);
     }
 
     public static EventBus eventBus(ModContainer container) {

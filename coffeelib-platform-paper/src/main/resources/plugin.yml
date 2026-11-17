@@ -3,3 +3,5 @@ version: ${version}
 main: net.loyalnetwork.coffeelib.paper.CoffeeLibPlugin
 description: Multiplatform configuration management library for Minecraft.
 author: LoyalNetwork
+# Loaded first when present, so the PlaceholderAPI bridge finds it at enable time.
+softdepend: [PlaceholderAPI]

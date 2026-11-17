@@ -6,6 +6,9 @@ base {
 
 repositories {
     maven("https://repo.papermc.io/repository/maven-public/")
+    // PlaceholderAPI, for the optional bridge. compileOnly below: never bundled, only used
+    // when the server has the PlaceholderAPI plugin installed.
+    maven("https://repo.extendedclip.com/releases/")
 }
 
 tasks.jar {
@@ -58,6 +61,9 @@ dependencies {
     // YamlConfiguration are identical at this layer, so this one module still
     // covers 1.8.x -> latest without recompiling per version.
     compileOnly("org.spigotmc:spigot-api:1.8.8-R0.1-SNAPSHOT")
+    compileOnly("me.clip:placeholderapi:2.11.6") {
+        isTransitive = false
+    }
 
     testImplementation("org.spigotmc:spigot-api:1.8.8-R0.1-SNAPSHOT")
     testImplementation("org.mockito:mockito-core:5.14.2")

@@ -593,6 +593,53 @@ método nomeado, e não quando alguém roda o comando.
 
 ---
 
+## Placeholders
+
+Registre placeholders uma vez e qualquer mod ou plugin do CoffeeLib consegue
+preenchê-los. No Paper é isso que o PlaceholderAPI já faz; no Forge e no
+NeoForge não existe sistema comum, então o CoffeeLib faz o intermédio.
+
+```java
+public final class CratePlaceholders {
+
+    @Placeholder("keys")                  // %crates_keys% e %crates_keys_daily%
+    int keys(ServerPlayer player, String crate) { ... }
+
+    @Placeholder("total")                 // %crates_total%, sem precisar de jogador
+    long total() { ... }
+}
+
+PlaceholderManager placeholders = CoffeeLib.placeholders(container);        // namespace = id do mod
+PlaceholderManager placeholders = CoffeeLib.placeholders("mymod", "crates"); // ou um escolhido
+placeholders.register(new CratePlaceholders());
+placeholders.register("season", context -> temporadaAtual());
+
+String line = placeholders.apply(player, "Você tem %crates_keys% chaves - %economy_balance%");
+```
+
+* **Sintaxe do PlaceholderAPI**: `%namespace_chave%`, `%namespace_chave_argumento%`,
+  então um texto escrito para o Paper funciona igual nas outras plataformas. O
+  namespace é casado com os registrados, do mais longo para o mais curto, em vez
+  de cortado no primeiro `_` — assim um id de mod como `my_mod` funciona.
+* **`apply` preenche todos os namespaces**, não só o seu — é assim que um mod usa
+  os placeholders de outro.
+* **Desconhecido, `null` ou com falha fica como está**: placeholder não
+  registrado, resolver que devolve `null` ou lança exceção (registrada no log em
+  nome do dono), ou que declara tipo de jogador sem haver um, continua no texto,
+  nunca trocado por algo enganoso. `50% off` não é placeholder.
+* **Parâmetros do resolver**, em qualquer ordem e todos opcionais: o jogador no
+  tipo da plataforma, uma `String` para o argumento, um `PlaceholderContext`.
+* **Paper com PlaceholderAPI**: cada namespace é publicado como expansion, então
+  plugins que usam PlaceholderAPI veem os seus, e o `apply` também preenche os
+  deles. O PlaceholderAPI é dependência opcional, nunca embutida. Ele corta
+  identificadores no primeiro `_`, então evite `_` num namespace que deva
+  aparecer lá. Placeholders e expansions de um plugin somem quando ele é
+  desabilitado.
+* Operadores conferem com `/coffeelib placeholder list` e
+  `/coffeelib placeholder parse <texto>` no Forge/NeoForge.
+
+---
+
 ## Integração por plataforma
 
 Cada plataforma expõe um entry point pequeno que retorna um `ConfigManager`

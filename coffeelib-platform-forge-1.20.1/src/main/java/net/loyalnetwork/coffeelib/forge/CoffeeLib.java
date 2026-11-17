@@ -4,6 +4,8 @@ import net.loyalnetwork.coffeelib.api.config.ConfigFormat;
 import net.loyalnetwork.coffeelib.api.config.ReloadableConfigManager;
 import net.loyalnetwork.coffeelib.api.command.CommandManager;
 import net.loyalnetwork.coffeelib.api.event.EventBus;
+import net.loyalnetwork.coffeelib.api.placeholder.PlaceholderManager;
+import net.loyalnetwork.coffeelib.core.placeholder.SharedPlaceholders;
 import net.loyalnetwork.coffeelib.forge.commands.ForgeCommandManager;
 import net.loyalnetwork.coffeelib.core.event.SharedEventBus;
 import net.minecraftforge.fml.ModLoadingContext;
@@ -133,6 +135,22 @@ public final class CoffeeLib {
     /** {@link #commands()} for when the mod id is given explicitly. */
     public static CommandManager commands(String modId) {
         return new ForgeCommandManager(modId);
+    }
+
+    /**
+     * Placeholders for the calling mod, under its mod id - call it from the mod constructor, registered as {@code %<namespace>_<key>%} in the
+     * registry every mod on CoffeeLib shares - the intermediary Forge does not
+     * have. {@link PlaceholderManager#apply} fills in any mod's placeholders,
+     * not just your own.
+     */
+    public static PlaceholderManager placeholders() {
+        String modId = ModLoadingContext.get().getActiveNamespace();
+        return placeholders(modId, modId);
+    }
+
+    /** Placeholders for {@code modId} under a namespace of its own choosing, e.g. {@code "crates"}. */
+    public static PlaceholderManager placeholders(String modId, String namespace) {
+        return SharedPlaceholders.forOwner(modId, namespace);
     }
 
     public static EventBus eventBus() {

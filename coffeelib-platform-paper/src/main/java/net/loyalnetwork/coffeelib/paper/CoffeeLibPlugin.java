@@ -1,6 +1,7 @@
 package net.loyalnetwork.coffeelib.paper;
 
 import net.loyalnetwork.coffeelib.core.event.SharedEventBus;
+import net.loyalnetwork.coffeelib.paper.placeholder.PaperPlaceholderManager;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.server.PluginDisableEvent;
@@ -32,5 +33,8 @@ public final class CoffeeLibPlugin extends JavaPlugin implements Listener {
     @EventHandler
     public void onPluginDisable(PluginDisableEvent event) {
         SharedEventBus.unregisterAll(event.getPlugin().getName());
+        // Same reasoning for placeholders: a resolver holds the plugin's objects, and a
+        // published PlaceholderAPI expansion would keep answering for a plugin that is gone.
+        PaperPlaceholderManager.cleanUp(event.getPlugin().getName());
     }
 }
