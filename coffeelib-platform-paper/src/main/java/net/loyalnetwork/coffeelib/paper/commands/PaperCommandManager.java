@@ -5,6 +5,7 @@ import net.loyalnetwork.coffeelib.api.exception.CoffeeLibException;
 import net.loyalnetwork.coffeelib.core.command.CommandDefinition;
 import net.loyalnetwork.coffeelib.core.command.CommandScanner;
 import net.loyalnetwork.coffeelib.core.command.TextCommandDispatcher;
+import net.loyalnetwork.coffeelib.paper.permission.PaperPermissionManager;
 import org.bukkit.Server;
 import org.bukkit.command.CommandMap;
 import org.bukkit.entity.Player;
@@ -40,6 +41,14 @@ public final class PaperCommandManager implements CommandManager {
     public synchronized void register(Object handler) {
         List<CommandDefinition> definitions = CommandScanner.scan(plugin.getName(), handler);
         dispatcher.addAll(definitions);
+
+        // Known to Bukkit - and so to LuckPerms' editor - with the default the op level implies.
+        for (CommandDefinition definition : definitions) {
+            if (!definition.permission().isEmpty()) {
+                PaperPermissionManager.declareCommandNode(plugin, definition.permission(),
+                        definition.permissionLevel(), definition.description());
+            }
+        }
 
         CommandMap commandMap = commandMap(plugin.getServer());
         String namespace = plugin.getName().toLowerCase(Locale.ROOT);

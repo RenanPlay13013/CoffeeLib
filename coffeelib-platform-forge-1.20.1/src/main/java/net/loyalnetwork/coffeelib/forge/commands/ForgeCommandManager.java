@@ -4,6 +4,7 @@ import net.loyalnetwork.coffeelib.api.command.CommandManager;
 import net.loyalnetwork.coffeelib.core.command.CommandDefinition;
 import net.loyalnetwork.coffeelib.core.command.CommandScanner;
 import net.loyalnetwork.coffeelib.core.command.TextCommandDispatcher;
+import net.loyalnetwork.coffeelib.core.permission.SharedPermissions;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.common.MinecraftForge;
@@ -44,6 +45,16 @@ public final class ForgeCommandManager implements CommandManager {
         List<CommandDefinition> definitions = CommandScanner.scan(ownerId, handler);
         // Duplicate paths are refused here, across this mod's handlers.
         paths.addAll(definitions);
+
+        // A command's node is known to the permission system - and so to LuckPerms' editor -
+        // with the default its op level implies, unless its owner declared it on purpose.
+        for (CommandDefinition definition : definitions) {
+            if (!definition.permission().isEmpty()) {
+                SharedPermissions.nodes().declareIfAbsent(ownerId, definition.permission(),
+                        SharedPermissions.defaultForLevel(definition.permissionLevel()),
+                        Math.max(definition.permissionLevel(), 0), definition.description());
+            }
+        }
 
         ForgeCommandRegistration registration = new ForgeCommandRegistration(ownerId, handler, definitions);
         registrations.add(registration);

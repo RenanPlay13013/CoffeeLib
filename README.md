@@ -629,6 +629,71 @@ String line = placeholders.apply(player, "You have %crates_keys% keys - %economy
 
 ---
 
+## Permissions
+
+Permission nodes with a default, checked the same way on every platform and
+**integrated with LuckPerms** out of the box. Declare them once, as constants:
+
+```java
+public final class CratePermissions {
+
+    @Permission(description = "Give crate keys")                      // operators by default
+    public static final String GIVE = "crates.give";
+
+    @Permission(def = PermissionDefault.EVERYONE, description = "Open crates")
+    public static final String OPEN = "crates.open";
+}
+
+PermissionManager permissions = CoffeeLib.permissions(container);     // Forge: permissions(), Paper: permissions(this)
+permissions.declare(CratePermissions.class);
+
+if (permissions.has(player, CratePermissions.GIVE)) { ... }
+
+@Command(value = "give", permission = CratePermissions.GIVE)          // and commands use the same node
+```
+
+How a node is decided:
+
+* **Forge/NeoForge**: first the platform's **PermissionAPI**, when the
+  server's permission handler is a real permission mod (LuckPerms or another)
+  rather than the platform's own default handler; then LuckPerms directly, when
+  it is installed and has an answer (granted *or* denied); otherwise the node's
+  default — `EVERYONE`,
+  `OPERATORS` (op level 2, or the command's own level), or `NOBODY` until
+  granted. So a mod's permissions work on a server with no permission plugin,
+  and the moment LuckPerms is added it takes over. The console has everything.
+  LuckPerms' API is a compile-only dependency: nothing of it is bundled, and no
+  LuckPerms class loads unless the mod is present.
+* **Paper**: Bukkit's own permission system, which LuckPerms and every other
+  permission plugin already hook into. A declared node is registered with the
+  server, default mapped (`EVERYONE` → true, `OPERATORS` → op, `NOBODY` →
+  false), so it shows up in permission plugins. Bukkit's rules apply as-is,
+  including that `NOBODY` is not granted to the console.
+* A node nobody declared is for operators; an empty node is for everyone.
+
+> **Nodes declared on a running server.** The PermissionAPI only accepts nodes
+> while the server starts, so a node declared later — a command registered on a
+> running server, say — cannot join it until a restart. Until then it is decided
+> by the rest of the chain (LuckPerms directly, then its default), and it is
+> written to `config/coffeelib/permission-nodes.cache`, whose header explains
+> all this; on the next start every node in that file is registered with the
+> PermissionAPI like any other. Entries of mods no longer installed are dropped,
+> and the file is safe to delete. A node must have at least two segments
+> (`crates.give`, not `crates`) and no wildcard to be registered there.
+
+Where CoffeeLib now checks nodes:
+
+* **Commands** on Forge/NeoForge used to check only an op level; a command's
+  `permission` now goes through the chain above, with its level as what
+  "operators" means. The node is declared automatically on `register` with the
+  default its level implies, unless you declared it yourself.
+* **`/coffeelib`'s own subcommands** have nodes instead of a flat op level 2:
+  `coffeelib.config.list`, `coffeelib.config.reload`,
+  `coffeelib.config.hotreload` and `coffeelib.placeholder`, all defaulting to
+  operators — so a server can hand config reloads to staff without giving them op.
+
+---
+
 ## Platform integration
 
 Each platform exposes a tiny entry point that returns a `ConfigManager` bound

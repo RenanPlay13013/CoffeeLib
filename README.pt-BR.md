@@ -640,6 +640,73 @@ String line = placeholders.apply(player, "Você tem %crates_keys% chaves - %econ
 
 ---
 
+## Permissões
+
+Nós de permissão com default, checados do mesmo jeito em todas as plataformas e
+**integrados ao LuckPerms** sem configuração. Declare uma vez, como constantes:
+
+```java
+public final class CratePermissions {
+
+    @Permission(description = "Dar chaves de caixa")                  // operadores por padrão
+    public static final String GIVE = "crates.give";
+
+    @Permission(def = PermissionDefault.EVERYONE, description = "Abrir caixas")
+    public static final String OPEN = "crates.open";
+}
+
+PermissionManager permissions = CoffeeLib.permissions(container);     // Forge: permissions(), Paper: permissions(this)
+permissions.declare(CratePermissions.class);
+
+if (permissions.has(player, CratePermissions.GIVE)) { ... }
+
+@Command(value = "give", permission = CratePermissions.GIVE)          // e os comandos usam o mesmo nó
+```
+
+Como um nó é decidido:
+
+* **Forge/NeoForge**: primeiro o **PermissionAPI** da plataforma, quando o
+  handler de permissão do servidor é um mod de permissão de verdade (LuckPerms ou
+  outro) e não o handler padrão da própria plataforma; depois o LuckPerms direto,
+  quando está instalado e tem resposta (concedido *ou* negado); senão, o default
+  do nó — `EVERYONE`,
+  `OPERATORS` (op nível 2, ou o nível do próprio comando) ou `NOBODY` até ser
+  concedido. Assim as permissões de um mod funcionam num servidor sem plugin de
+  permissão, e no momento em que o LuckPerms entra ele assume. O console tem
+  tudo. A API do LuckPerms é dependência só de compilação: nada dela vai no jar,
+  e nenhuma classe do LuckPerms é carregada se o mod não estiver presente.
+* **Paper**: o sistema de permissões do próprio Bukkit, no qual o LuckPerms e
+  qualquer outro plugin de permissão já se integram. Um nó declarado é
+  registrado no servidor com o default mapeado (`EVERYONE` → true,
+  `OPERATORS` → op, `NOBODY` → false), então aparece nos plugins de permissão.
+  As regras do Bukkit valem como são, inclusive a de que `NOBODY` não é
+  concedido ao console.
+* Um nó que ninguém declarou é de operadores; um nó vazio é de todos.
+
+> **Nós declarados com o servidor rodando.** O PermissionAPI só aceita nós
+> durante a subida do servidor, então um nó declarado depois — um comando
+> registrado com o servidor já no ar, por exemplo — só entra nele no próximo
+> reinício. Até lá ele é decidido pelo resto da cadeia (LuckPerms direto, depois
+> o default) e é gravado em `config/coffeelib/permission-nodes.cache`, cujo
+> header explica tudo isso; na próxima subida, todo nó desse arquivo é
+> registrado no PermissionAPI como qualquer outro. Entradas de mods que não
+> estão mais instalados são descartadas, e o arquivo pode ser apagado sem risco.
+> Para entrar no PermissionAPI o nó precisa de pelo menos dois segmentos
+> (`crates.give`, não `crates`) e nenhum curinga.
+
+Onde o CoffeeLib passou a checar nós:
+
+* **Comandos** no Forge/NeoForge antes checavam só nível de op; o `permission`
+  de um comando agora passa pela cadeia acima, com o nível dele como o que
+  "operadores" significa. O nó é declarado automaticamente no `register`, com o
+  default que o nível implica, a menos que você tenha declarado.
+* **Os subcomandos do próprio `/coffeelib`** têm nós em vez de op nível 2 fixo:
+  `coffeelib.config.list`, `coffeelib.config.reload`,
+  `coffeelib.config.hotreload` e `coffeelib.placeholder`, todos com default de
+  operador — então um servidor pode dar reload de config à staff sem dar op.
+
+---
+
 ## Integração por plataforma
 
 Cada plataforma expõe um entry point pequeno que retorna um `ConfigManager`

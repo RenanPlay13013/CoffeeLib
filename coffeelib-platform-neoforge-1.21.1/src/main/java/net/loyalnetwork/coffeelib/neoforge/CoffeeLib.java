@@ -4,6 +4,9 @@ import net.loyalnetwork.coffeelib.api.config.ConfigFormat;
 import net.loyalnetwork.coffeelib.api.config.ReloadableConfigManager;
 import net.loyalnetwork.coffeelib.api.command.CommandManager;
 import net.loyalnetwork.coffeelib.api.event.EventBus;
+import net.loyalnetwork.coffeelib.api.permission.PermissionManager;
+import net.loyalnetwork.coffeelib.core.permission.DefaultPermissionManager;
+import net.loyalnetwork.coffeelib.neoforge.permission.NeoForgePermissions;
 import net.loyalnetwork.coffeelib.api.placeholder.PlaceholderManager;
 import net.loyalnetwork.coffeelib.core.placeholder.SharedPlaceholders;
 import net.loyalnetwork.coffeelib.neoforge.commands.NeoForgeCommandManager;
@@ -146,6 +149,20 @@ public final class CoffeeLib {
     /** Placeholders for {@code modId} under a namespace of its own choosing, e.g. {@code "crates"}. */
     public static PlaceholderManager placeholders(String modId, String namespace) {
         return SharedPlaceholders.forOwner(modId, namespace);
+    }
+
+    /**
+     * Permission nodes for {@code container}'s mod: declared with a default, checked
+     * through LuckPerms when it is installed and against that default when it
+     * is not (or has no answer).
+     */
+    public static PermissionManager permissions(ModContainer container) {
+        return permissions(container.getModId());
+    }
+
+    /** {@link PermissionManager} for {@code modId}. */
+    public static PermissionManager permissions(String modId) {
+        return new DefaultPermissionManager(modId, NeoForgePermissions.resolver());
     }
 
     public static EventBus eventBus(ModContainer container) {

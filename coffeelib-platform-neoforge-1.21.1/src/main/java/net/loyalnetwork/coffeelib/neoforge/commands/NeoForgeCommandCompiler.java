@@ -16,6 +16,7 @@ import net.loyalnetwork.coffeelib.api.command.exception.CommandException;
 import net.loyalnetwork.coffeelib.core.command.ArgumentKind;
 import net.loyalnetwork.coffeelib.core.command.CommandDefinition;
 import net.loyalnetwork.coffeelib.core.command.ParameterDefinition;
+import net.loyalnetwork.coffeelib.neoforge.permission.NeoForgePermissions;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
@@ -70,8 +71,11 @@ public final class NeoForgeCommandCompiler {
             if (j == path.size() - 1) {
                 // On the deepest literal, not the root: trees for one root merge, and a
                 // requirement on the shared root would hide every sibling subcommand.
+                // The node through the permission chain (LuckPerms, then its default), with the
+                // op level as what "operators" means - and as the whole check when there is no node.
                 int level = definition.permissionLevel();
-                literal.requires(source -> source.hasPermission(level));
+                String node = definition.permission();
+                literal.requires(source -> NeoForgePermissions.check(source, node, level));
                 if (required == 0) {
                     literal.executes(context -> run(definition, context, 0));
                 }

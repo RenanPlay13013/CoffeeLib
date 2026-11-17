@@ -22,6 +22,9 @@ import net.minecraftforge.fml.common.Mod;
 public final class CoffeeLibMod {
 
     public CoffeeLibMod() {
+        net.loyalnetwork.coffeelib.forge.permission.ForgePermissionBridge.install();
+        new net.loyalnetwork.coffeelib.core.permission.DefaultPermissionManager("coffeelib",
+                net.loyalnetwork.coffeelib.forge.permission.ForgePermissions.resolver()).declare(net.loyalnetwork.coffeelib.core.permission.CoffeeLibNodes.class);
         // The game bus, not the mod bus: RegisterCommandsEvent fires per server start.
         MinecraftForge.EVENT_BUS.addListener(this::onRegisterCommands);
     }

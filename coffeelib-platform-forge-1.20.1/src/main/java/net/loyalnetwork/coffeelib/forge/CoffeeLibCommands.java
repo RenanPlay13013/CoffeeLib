@@ -6,7 +6,9 @@ import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.suggestion.SuggestionProvider;
 import net.loyalnetwork.coffeelib.api.config.ConfigReloadService;
 import net.loyalnetwork.coffeelib.core.config.reload.ConfigReloadRegistry;
+import net.loyalnetwork.coffeelib.core.permission.CoffeeLibNodes;
 import net.loyalnetwork.coffeelib.core.placeholder.SharedPlaceholders;
+import net.loyalnetwork.coffeelib.forge.permission.ForgePermissions;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -57,11 +59,15 @@ final class CoffeeLibCommands {
     static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
         registerPlaceholderCommands(dispatcher);
         dispatcher.register(Commands.literal("coffeelib")
-                .requires(source -> source.hasPermission(2))
+                .requires(source -> allowed(source, CoffeeLibNodes.CONFIG_LIST)
+                        || allowed(source, CoffeeLibNodes.CONFIG_RELOAD)
+                        || allowed(source, CoffeeLibNodes.CONFIG_HOTRELOAD))
                 .then(Commands.literal("config")
                         .then(Commands.literal("list")
+                                .requires(source -> allowed(source, CoffeeLibNodes.CONFIG_LIST))
                                 .executes(CoffeeLibCommands::list))
                         .then(Commands.literal("reload")
+                                .requires(source -> allowed(source, CoffeeLibNodes.CONFIG_RELOAD))
                                 .executes(context -> reload(context, null, null))
                                 .then(Commands.argument("mod", StringArgumentType.word())
                                         .suggests(MOD_IDS)
@@ -71,6 +77,7 @@ final class CoffeeLibCommands {
                                                 .executes(context -> reload(context, modIdOf(context),
                                                         StringArgumentType.getString(context, "file"))))))
                         .then(Commands.literal("hotreload")
+                                .requires(source -> allowed(source, CoffeeLibNodes.CONFIG_HOTRELOAD))
                                 .executes(CoffeeLibCommands::hotReloadStatus)
                                 .then(Commands.literal("status")
                                         .executes(CoffeeLibCommands::hotReloadStatus))
@@ -239,7 +246,7 @@ final class CoffeeLibCommands {
      */
     private static void registerPlaceholderCommands(CommandDispatcher<CommandSourceStack> dispatcher) {
         dispatcher.register(Commands.literal("coffeelib")
-                .requires(source -> source.hasPermission(2))
+                .requires(source -> allowed(source, CoffeeLibNodes.PLACEHOLDER))
                 .then(Commands.literal("placeholder")
                         .then(Commands.literal("list")
                                 .executes(context -> {
@@ -262,6 +269,15 @@ final class CoffeeLibCommands {
                                             context.getSource().sendSuccess(() -> info(parsed), false);
                                             return 1;
                                         })))));
+    }
+
+    /**
+     * A {@code /coffeelib} node, through the same chain as every other CoffeeLib
+     * permission. Op level 2 is what "operators" means here, which is what these
+     * subcommands required before they had nodes.
+     */
+    private static boolean allowed(CommandSourceStack source, String node) {
+        return ForgePermissions.check(source, node, 2);
     }
 
     private static Component info(String message) {

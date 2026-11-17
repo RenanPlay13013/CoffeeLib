@@ -22,6 +22,9 @@ import net.neoforged.neoforge.event.RegisterCommandsEvent;
 public final class CoffeeLibMod {
 
     public CoffeeLibMod() {
+        net.loyalnetwork.coffeelib.neoforge.permission.NeoForgePermissionBridge.install();
+        new net.loyalnetwork.coffeelib.core.permission.DefaultPermissionManager("coffeelib",
+                net.loyalnetwork.coffeelib.neoforge.permission.NeoForgePermissions.resolver()).declare(net.loyalnetwork.coffeelib.core.permission.CoffeeLibNodes.class);
         // The game bus, not the mod bus: RegisterCommandsEvent fires per server start.
         NeoForge.EVENT_BUS.addListener(RegisterCommandsEvent.class, this::onRegisterCommands);
     }

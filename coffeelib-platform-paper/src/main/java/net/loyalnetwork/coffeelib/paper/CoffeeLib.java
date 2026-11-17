@@ -4,6 +4,8 @@ import net.loyalnetwork.coffeelib.api.config.ConfigFormat;
 import net.loyalnetwork.coffeelib.api.config.ReloadableConfigManager;
 import net.loyalnetwork.coffeelib.api.command.CommandManager;
 import net.loyalnetwork.coffeelib.api.event.EventBus;
+import net.loyalnetwork.coffeelib.api.permission.PermissionManager;
+import net.loyalnetwork.coffeelib.paper.permission.PaperPermissionManager;
 import net.loyalnetwork.coffeelib.api.placeholder.PlaceholderManager;
 import net.loyalnetwork.coffeelib.paper.placeholder.PaperPlaceholderManager;
 import net.loyalnetwork.coffeelib.paper.commands.PaperCommandManager;
@@ -75,6 +77,16 @@ public final class CoffeeLib {
      */
     public static PlaceholderManager placeholders(JavaPlugin plugin, String namespace) {
         return new PaperPlaceholderManager(plugin, namespace);
+    }
+
+    /**
+     * Permission nodes for {@code plugin}. Checks go through Bukkit, which
+     * LuckPerms and other permission plugins already hook into; declaring a
+     * node registers it with the server with its default, so it shows up in
+     * permission plugins and ops get it with no plugin at all.
+     */
+    public static PermissionManager permissions(JavaPlugin plugin) {
+        return new PaperPermissionManager(plugin);
     }
 
     /**

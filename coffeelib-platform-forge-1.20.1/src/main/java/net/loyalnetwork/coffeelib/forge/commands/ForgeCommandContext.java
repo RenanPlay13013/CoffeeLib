@@ -1,15 +1,17 @@
 package net.loyalnetwork.coffeelib.forge.commands;
 
 import net.loyalnetwork.coffeelib.api.command.CommandSource;
+import net.loyalnetwork.coffeelib.forge.permission.ForgePermissions;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.Component;
 
 /**
  * A {@link CommandSource} over Forge's {@link CommandSourceStack}.
  * <p>
- * Forge has operator levels rather than permission nodes, so a node passes
- * when the source has the level its command derived for it - the same check
- * Brigadier's {@code requires} already made before the command could run.
+ * Permission nodes go through {@link ForgePermissions}: LuckPerms when it is
+ * installed, the node's declared default otherwise, with the command's op
+ * level standing in for "operators" - the same check its Brigadier
+ * {@code requires} made before the command could run.
  */
 public final class ForgeCommandContext implements CommandSource {
 
@@ -33,7 +35,7 @@ public final class ForgeCommandContext implements CommandSource {
 
     @Override
     public boolean hasPermission(String permission) {
-        return permission.isEmpty() || stack.hasPermission(permissionLevel);
+        return ForgePermissions.check(stack, permission, permissionLevel);
     }
 
     @Override
