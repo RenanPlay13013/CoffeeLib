@@ -2,7 +2,9 @@ package net.loyalnetwork.coffeelib.paper;
 
 import net.loyalnetwork.coffeelib.api.config.ConfigFormat;
 import net.loyalnetwork.coffeelib.api.config.ReloadableConfigManager;
+import net.loyalnetwork.coffeelib.api.command.CommandManager;
 import net.loyalnetwork.coffeelib.api.event.EventBus;
+import net.loyalnetwork.coffeelib.paper.commands.PaperCommandManager;
 import net.loyalnetwork.coffeelib.core.event.SharedEventBus;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -41,6 +43,16 @@ public final class CoffeeLib {
     public static ReloadableConfigManager forPlugin(JavaPlugin plugin, Path configDirectory) {
         Path directory = configDirectory != null ? configDirectory : plugin.getDataFolder().toPath();
         return new PaperConfigManager(plugin.getName(), directory);
+    }
+
+    /**
+     * Annotation-driven commands for {@code plugin}: every {@code @Command}
+     * method of a handler passed to {@link CommandManager#register} becomes a
+     * Bukkit command with tab completion, under {@code plugin}'s own namespace
+     * ({@code /yourplugin:crate}). No {@code plugin.yml} entry is needed.
+     */
+    public static CommandManager commands(JavaPlugin plugin) {
+        return new PaperCommandManager(plugin);
     }
 
     /**

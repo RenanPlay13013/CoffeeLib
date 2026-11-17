@@ -531,6 +531,68 @@ e agir sobre um estado pela metade seria pior do que não agir.
 
 ---
 
+## Comandos
+
+Anote um método e ele **é** o executor do comando; os parâmetros são os
+argumentos, e o tipo de cada um decide o parse e o tab completion.
+
+```java
+@Command(value = "crate", aliases = "crates")
+public final class CrateCommands {
+
+    @Command("")                                         // /crate
+    void help(CommandSource source) { ... }
+
+    @Command(value = "give", permission = "crates.give") // /crate give <player> [amount] [rarity]
+    void give(CommandSource source,
+              @Arg("player") @Suggest(provider = "online") String player,
+              @Arg("amount") @Default("1") int amount,
+              @Arg("rarity") @Default("common") Rarity rarity) { ... }
+
+    @Command("open")                                     // só jogadores: o tipo do sender diz isso
+    void open(ServerPlayer player, @Arg("crate") @Suggest({"daily", "vote"}) String crate) { ... }
+
+    @Command("announce")
+    void announce(@Arg("message") @Greedy String message) { ... }
+
+    Collection<String> online() { ... }                  // sugestões, filtradas enquanto digita
+}
+
+CoffeeLib.commands(container).register(new CrateCommands());   // NeoForge
+CoffeeLib.commands().register(new CrateCommands());            // Forge, do construtor do mod
+CoffeeLib.commands(this).register(new CrateCommands());        // Paper, sem entrada no plugin.yml
+```
+
+* **Argumentos:** `String`, `int`, `long`, `double`, `float`, `boolean` (e
+  wrappers), enums. `@Default` torna um opcional (opcionais vão por último),
+  `@Greedy` pega o resto da linha, `@Arg` dá o nome — necessário a menos que você
+  compile com `-parameters`.
+* **Tab completion:** subcomandos, constantes de enum e booleanos completam
+  sozinhos; `@Suggest` acrescenta valores fixos ou um método provedor. No
+  Forge/NeoForge os comandos viram **Brigadier**, então o cliente valida números
+  enquanto o jogador digita; no Paper um completer é registrado junto.
+* **Sender:** primeiro parâmetro opcional — `CommandSource` em qualquer
+  plataforma, ou o tipo nativo (`ServerPlayer`, `CommandSourceStack`, `Player`,
+  `CommandSender`). O console rodando um comando só de jogador é recusado com
+  mensagem.
+* **Permissões:** `permission` é um node no Paper; no Forge/NeoForge o
+  `permissionLevel` é o nível de operador, derivado como 2 quando há `permission`
+  e 0 quando não há. Um valor na classe vale para todos os métodos.
+* **Erros:** número inválido, argumento faltando ou permissão faltando são
+  informados ao sender, com a linha de uso. Lance `CommandException` do executor
+  para mensagens próprias; qualquer outra exceção é bug — vai para o log, e o
+  sender só fica sabendo que algo deu errado.
+* **Namespace:** no Paper o comando fica no namespace **do seu plugin**
+  (`/seuplugin:crate`) e é atribuído ao seu plugin no `/help`, não ao CoffeeLib.
+  Comandos Brigadier não têm namespace no Forge/NeoForge — os do vanilla também
+  não —, então é simplesmente `/crate`, com o log no id do seu mod.
+
+Erros num handler — opcional antes de obrigatório, tipo não suportado, provedor
+inexistente, dois métodos para o mesmo caminho — falham no `register`, com o
+método nomeado, e não quando alguém roda o comando.
+
+---
+
 ## Integração por plataforma
 
 Cada plataforma expõe um entry point pequeno que retorna um `ConfigManager`

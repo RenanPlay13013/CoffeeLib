@@ -2,7 +2,9 @@ package net.loyalnetwork.coffeelib.forge;
 
 import net.loyalnetwork.coffeelib.api.config.ConfigFormat;
 import net.loyalnetwork.coffeelib.api.config.ReloadableConfigManager;
+import net.loyalnetwork.coffeelib.api.command.CommandManager;
 import net.loyalnetwork.coffeelib.api.event.EventBus;
+import net.loyalnetwork.coffeelib.forge.commands.ForgeCommandManager;
 import net.loyalnetwork.coffeelib.core.event.SharedEventBus;
 import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
@@ -117,6 +119,22 @@ public final class CoffeeLib {
      * CoffeeLib into itself gets a private bus instead - see
      * {@link net.loyalnetwork.coffeelib.core.event.SharedEventBus}.
      */
+    /**
+     * Annotation-driven commands for the calling mod: every {@code @Command}
+     * method of a handler passed to {@link CommandManager#register} becomes a
+     * Brigadier command with tab completion. Call it from the mod constructor,
+     * where Forge knows the active mod id; {@link #commands(String)} works
+     * anywhere.
+     */
+    public static CommandManager commands() {
+        return commands(ModLoadingContext.get().getActiveNamespace());
+    }
+
+    /** {@link #commands()} for when the mod id is given explicitly. */
+    public static CommandManager commands(String modId) {
+        return new ForgeCommandManager(modId);
+    }
+
     public static EventBus eventBus() {
         return eventBus(ModLoadingContext.get().getActiveNamespace());
     }

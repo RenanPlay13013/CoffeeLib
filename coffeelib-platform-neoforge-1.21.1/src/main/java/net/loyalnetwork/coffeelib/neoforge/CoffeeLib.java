@@ -2,7 +2,9 @@ package net.loyalnetwork.coffeelib.neoforge;
 
 import net.loyalnetwork.coffeelib.api.config.ConfigFormat;
 import net.loyalnetwork.coffeelib.api.config.ReloadableConfigManager;
+import net.loyalnetwork.coffeelib.api.command.CommandManager;
 import net.loyalnetwork.coffeelib.api.event.EventBus;
+import net.loyalnetwork.coffeelib.neoforge.commands.NeoForgeCommandManager;
 import net.loyalnetwork.coffeelib.core.event.SharedEventBus;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.loading.FMLPaths;
@@ -113,6 +115,22 @@ public final class CoffeeLib {
      * CoffeeLib into itself gets a private bus instead - see
      * {@link net.loyalnetwork.coffeelib.core.event.SharedEventBus}.
      */
+    /**
+     * Annotation-driven commands for {@code container}'s mod: every
+     * {@code @Command} method of a handler passed to
+     * {@link CommandManager#register} becomes a Brigadier command with tab
+     * completion. Call it from the mod constructor or later - commands
+     * registered while a server runs are added to it straight away.
+     */
+    public static CommandManager commands(ModContainer container) {
+        return commands(container.getModId());
+    }
+
+    /** {@link #commands(ModContainer)} for when only the mod id is at hand. */
+    public static CommandManager commands(String modId) {
+        return new NeoForgeCommandManager(modId);
+    }
+
     public static EventBus eventBus(ModContainer container) {
         return eventBus(container.getModId());
     }
