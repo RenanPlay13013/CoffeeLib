@@ -61,6 +61,9 @@ final class PooledDatabase implements Database {
     static PooledDatabase connect(String ownerId, ClassLoader ownerLoader, DatabaseSettings settings) {
         if (settings.type().isEmbedded() && settings.jdbcUrl() == null) {
             createParent(ownerId, settings.file());
+            if (settings.type() == DatabaseType.H2) {
+                H2FileUpgrade.upgradeIfNeeded(ownerId, settings.file(), ownerLoader);
+            }
         }
         if (settings.type() == DatabaseType.SQLITE && !sqliteAvailable(ownerLoader)) {
             throw new DatabaseException("[" + ownerId + "] SQLite's driver (org.sqlite.JDBC) is not on the classpath. "

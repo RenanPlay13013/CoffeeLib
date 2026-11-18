@@ -30,8 +30,14 @@ dependencies {
     shaded("org.slf4j:slf4j-api:2.0.16")
     shaded("org.slf4j:slf4j-jdk14:2.0.16")
 
-    // H2, embedded: pure Java, so relocated like the rest.
-    shaded("com.h2database:h2:2.3.232")
+    // H2 is NOT relocated for use: H2 writes its own class names into the database file,
+    // so a relocated H2 makes files no other tool can open, tied to CoffeeLib's package.
+    // The H2 CoffeeLib uses is the published one, shipped beside it (nested on Forge and
+    // NeoForge, a plugin library on Paper). This relocated copy is kept for one job only:
+    // reading the files CoffeeLib 3.6 and 3.7 wrote with it, to convert them
+    // (H2FileUpgrade). Every reference to org.h2 in this module's classes is rewritten to
+    // the relocated copy, so code meant for the real H2 names it by string.
+    shaded("com.h2database:h2:${property("h2_version")}")
 
     // SQLite is the exception: its native library binds to the org.sqlite package by name,
     // so relocating it breaks it. It is not in this jar at all - Paper servers ship it, and
@@ -62,7 +68,13 @@ tasks.shadowJar {
     relocate("org.h2", "$libs.h2")
     // java.sql.Driver and SLF4J's provider are found through META-INF/services; this
     // rewrites those files along with the classes they name.
-    mergeServiceFiles()
+    // The pool names its driver class, so nothing needs the relocated drivers registered
+    // with the JVM-wide DriverManager - where they would answer another mod's
+    // DriverManager.getConnection("jdbc:h2:...") with CoffeeLib's private copy.
+    mergeServiceFiles {
+        exclude("META-INF/services/java.sql.Driver")
+    }
+    exclude("META-INF/services/java.sql.Driver")
     exclude("META-INF/maven/**", "META-INF/versions/**", "module-info.class",
         "META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA")
 }

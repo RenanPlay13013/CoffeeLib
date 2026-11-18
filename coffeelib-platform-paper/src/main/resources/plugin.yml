@@ -10,5 +10,6 @@ softdepend: [PlaceholderAPI]
 # shading it. Not bundled: it is a large API a plugin calls directly, so it keeps its
 # real names. SQLite needs nothing here - the server ships it.
 libraries:
+  - com.h2database:h2:${h2Version}
   - org.hibernate.orm:hibernate-core:${hibernateVersion}
   - org.hibernate.orm:hibernate-community-dialects:${hibernateVersion}

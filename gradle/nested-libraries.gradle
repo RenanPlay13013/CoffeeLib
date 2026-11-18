@@ -46,6 +46,7 @@ configurations.configureEach {
 
 dependencies {
     nestedPlain "org.xerial:sqlite-jdbc:${sqliteVersion}"
+    nestedPlain "com.h2database:h2:${rootProject.property('h2_version')}"
     // Replaced by coffeelib-hibernate's repack when nested (see gameLibraries).
     nestedHibernate "org.hibernate.orm:hibernate-core:${hibernateVersion}"
     // SQLiteDialect, maintained by the Hibernate project in its community dialects.

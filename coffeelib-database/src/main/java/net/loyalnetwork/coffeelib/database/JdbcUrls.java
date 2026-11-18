@@ -7,6 +7,9 @@ import net.loyalnetwork.coffeelib.api.database.DatabaseType;
 /** The JDBC URL and driver for some settings. */
 final class JdbcUrls {
 
+    /** {@code org.h2.Driver}, spelled so the jar's relocation of org.h2 leaves it alone. */
+    static final String H2_DRIVER = String.join(".", "org", "h2", "Driver");
+
     private JdbcUrls() {
     }
 
@@ -57,7 +60,9 @@ final class JdbcUrls {
     static String driverClass(DatabaseType type) {
         return switch (type) {
             case POSTGRESQL -> org.postgresql.Driver.class.getName();
-            case H2 -> org.h2.Driver.class.getName();
+            // The published H2, not the relocated copy in this jar (see H2FileUpgrade); built
+            // from parts so the relocation does not rewrite it.
+            case H2 -> H2_DRIVER;
             // Not relocated into CoffeeLib's classes (SQLite's native code is bound to this
             // package name, so it cannot be): the server's copy on Paper, a nested jar on
             // Forge and NeoForge. Named, not linked, so nothing fails until it is used.

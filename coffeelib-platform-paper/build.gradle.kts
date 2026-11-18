@@ -32,7 +32,8 @@ tasks.jar {
 
 tasks.processResources {
     filesMatching("plugin.yml") {
-        expand("version" to project.version, "hibernateVersion" to project.property("hibernate_version"))
+        expand("version" to project.version, "hibernateVersion" to project.property("hibernate_version"),
+            "h2Version" to project.property("h2_version"))
     }
 }
 

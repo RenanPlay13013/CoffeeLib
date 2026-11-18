@@ -64,7 +64,7 @@ O CoffeeLib é dividido em sete módulos sob `net.loyalnetwork`:
 ```
 coffeelib-api                    interfaces, anotações, exceções (sem dependências)
 coffeelib-core                   implementações agnósticas de plataforma (Java puro)
-coffeelib-database               pools de conexão; HikariCP, MariaDB, PostgreSQL e H2 relocados dentro
+coffeelib-database               pools de conexão; HikariCP, MariaDB e PostgreSQL relocados dentro
 coffeelib-hibernate              hibernate-core reempacotado para os loaders forge-like (interno)
 coffeelib-platform-paper         backend Paper (Configurate YAML)
 coffeelib-platform-forge-1.20.1  integração Forge 1.20.1 (Java 17)
@@ -96,15 +96,15 @@ repositories {
 
 dependencies {
     // Paper
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-paper:3.7")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-paper:3.8")
     // Forge 1.20.1
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-forge-1.20.1:3.7")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-forge-1.20.1:3.8")
     // NeoForge 1.21.1
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-neoforge-1.21.1:3.7")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-neoforge-1.21.1:3.8")
     // Ou apenas o core agnóstico de formato (config + DI, sem backend de plataforma)
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-core:3.7")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-core:3.8")
     // Ou só as interfaces e anotações
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-api:3.7")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-api:3.8")
 }
 ```
 
@@ -791,8 +791,18 @@ funcionam como num servidor, então migrar para MySQL depois é uma mudança no
   CoffeeLib usa a cópia que o servidor já traz; no Forge e no NeoForge ele vai
   aninhado no jar da CoffeeLib (`META-INF/jarjar`), e o loader mantém uma cópia
   só quando outros mods também o aninham.
-* **H2** é Java puro, embutido e relocado como os drivers de servidor, e guarda
-  tudo em `<file>.mv.db`.
+* **H2** guarda tudo em `<file>.mv.db`, um arquivo H2 comum que qualquer
+  ferramenta de banco abre (DBeaver, IntelliJ, o console do próprio H2; usuário
+  vazio, sem senha). É o H2 publicado, não relocado: o H2 grava o nome das
+  próprias classes no arquivo, então uma cópia relocada geraria arquivos que só a
+  CoffeeLib lê. Ele é distribuído como o SQLite (aninhado no Forge/NeoForge,
+  biblioteca do plugin no Paper).
+
+> **Arquivos H2 da CoffeeLib 3.6 e 3.7** foram gravados por uma cópia relocada
+> dessas, e outras ferramentas dizem que eles estão corrompidos. Na primeira vez
+> que um deles é aberto, ele é convertido sozinho para um arquivo H2 padrão (não
+> precisa fazer nada) e o original fica ao lado como
+> `<file>.mv.db.coffeelib-old`, para apagar quando tudo estiver funcionando.
 
 Os dois são para um único processo de servidor: dois servidores compartilhando
 um banco precisam de MySQL, MariaDB ou PostgreSQL.
@@ -846,6 +856,63 @@ CompletableFuture.runAsync(() -> sessions.inTransaction(session -> session.persi
   servidor.
 * Uma associação lazy vira um proxy que carrega numa **chamada de método**: leia
   os dados dela por getters, não por campos públicos.
+
+#### Repositórios
+
+O `HibernateRepository<T, ID>` é o CRUD de sempre para uma entidade, com os
+mesmos futures e as mesmas threads de todo o resto aqui. Estenda-o e acrescente
+as suas consultas com `read(...)` (sem transação) e `write(...)` (uma transação,
+com commit ao retornar e rollback se lançar exceção):
+
+```java
+public class PlayerRepository extends HibernateRepository<PlayerEntity, String> {
+    public PlayerRepository(SessionFactory sessions, Database database) {
+        super(sessions, database, PlayerEntity.class);
+    }
+
+    public CompletableFuture<Optional<PlayerEntity>> findByName(String name) {
+        return read(session -> session
+                .createSelectionQuery("from PlayerEntity where name = :name", PlayerEntity.class)
+                .setParameter("name", name)
+                .uniqueResultOptional());
+    }
+}
+```
+
+| Método | Devolve | Observações |
+|---|---|---|
+| `save(entity)` | `T` | Insere ou atualiza (`merge`). Use a instância **devolvida**: ela é a cópia gerenciada, e é nela que vem um id gerado. |
+| `saveAll(entities)` | `List<T>` | Uma transação: salva todos, ou nenhum. |
+| `findById(id)` | `Optional<T>` | |
+| `findAllById(ids)` | `List<T>` | Uma consulta só; ids sem linha ficam de fora. |
+| `findAll()` | `List<T>` | |
+| `existsById(id)` | `Boolean` | |
+| `count()` | `Long` | |
+| `deleteById(id)` | `Boolean` | Se havia algo para apagar. |
+| `delete(entity)` | `Void` | Funciona com entidades *detached*, como as que um repositório devolve. |
+| `deleteAll()` | `Integer` | Um `delete` em massa: callbacks e cascatas do JPA **não** rodam. |
+
+O construtor confere se a classe é uma entidade daquele `SessionFactory`, então
+esquecê-la no `CoffeeHibernate.sessionFactory(db, ...)` falha ali mesmo, e não na
+primeira consulta. Falhas completam o future com uma `DatabaseException` que traz
+a mensagem do Hibernate.
+
+Quatro coisas para ter em mente:
+
+1. **As entidades devolvidas são *detached*.** A sessão delas já fechou quando o
+   future completa, então ler uma associação `LAZY` depois disso lança
+   `LazyInitializationException`. Busque o que precisa dentro do `read(...)`,
+   com uma consulta `join fetch`.
+2. **Os futures completam numa thread do banco**, não na do servidor. Volte para
+   ela antes de mexer no mundo: `server.execute(...)` no Forge e no NeoForge, o
+   scheduler do Bukkit no Paper.
+3. **O `save` usa `merge`.** O objeto que você passa não fica gerenciado; guarde
+   o devolvido. (Para quem vem do Spring: aqui ele nunca é o mesmo objeto.)
+4. **Uma chamada é uma transação.** `findById` seguido de `save` são duas; coloque
+   as duas dentro de um `write(...)` quando precisarem acontecer juntas.
+
+**Não existem consultas derivadas do nome do método**: um `findByName` nunca é
+gerado para você. Escreva-o com `read(...)`, como acima.
 
 Como ele é distribuído:
 

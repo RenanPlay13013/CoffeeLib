@@ -60,7 +60,7 @@ CoffeeLib is split into seven modules under `net.loyalnetwork`:
 ```
 coffeelib-api                    interfaces, annotations, exceptions (no deps)
 coffeelib-core                   platform-agnostic implementations (pure Java)
-coffeelib-database               connection pools; HikariCP, MariaDB, PostgreSQL and H2 relocated inside
+coffeelib-database               connection pools; HikariCP, MariaDB and PostgreSQL relocated inside
 coffeelib-hibernate              hibernate-core repacked for Forge-like loaders (internal)
 coffeelib-platform-paper         Paper backend (Configurate YAML)
 coffeelib-platform-forge-1.20.1  Forge 1.20.1 integration (Java 17)
@@ -96,15 +96,15 @@ repositories {
 
 dependencies {
     // Paper
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-paper:3.7")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-paper:3.8")
     // Forge 1.20.1
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-forge-1.20.1:3.7")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-forge-1.20.1:3.8")
     // NeoForge 1.21.1
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-neoforge-1.21.1:3.7")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-neoforge-1.21.1:3.8")
     // Or just the format-agnostic core (config + DI, no platform backend)
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-core:3.7")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-core:3.8")
     // Or only the interfaces and annotations
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-api:3.7")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-api:3.8")
 }
 ```
 
@@ -779,8 +779,18 @@ between them.
   the copy the server ships; on Forge and NeoForge it is nested in CoffeeLib's
   jar (`META-INF/jarjar`), and the loader keeps one copy when other mods nest it
   too.
-* **H2** is pure Java, bundled and relocated like the server drivers, and keeps
-  everything in `<file>.mv.db`.
+* **H2** keeps everything in `<file>.mv.db`, an ordinary H2 file that any
+  database tool opens (DBeaver, IntelliJ, H2's own console; user empty, no
+  password). It is the published H2, not relocated: H2 writes its own class
+  names into the file, so a relocated copy would make files only CoffeeLib can
+  read. It ships like SQLite (nested on Forge/NeoForge, a plugin library on
+  Paper).
+
+> **H2 files from CoffeeLib 3.6 and 3.7** were written by such a relocated
+> copy, and other tools call them corrupted. The first time one is opened, it is
+> converted to a standard H2 file automatically - nothing to do - and the
+> original is kept beside it as `<file>.mv.db.coffeelib-old`, to delete once
+> everything works.
 
 Either is for one server process: two servers sharing a database need MySQL,
 MariaDB or PostgreSQL.
@@ -835,6 +845,63 @@ CompletableFuture.runAsync(() -> sessions.inTransaction(session -> session.persi
   thread.
 * A lazy association becomes a proxy that loads on a **method call**: read its
   data through getters, not public fields.
+
+#### Repositories
+
+`HibernateRepository<T, ID>` is the usual CRUD for one entity, on the same
+futures and threads as everything else here. Extend it, and add your own
+queries with `read(...)` (no transaction) and `write(...)` (one transaction,
+committed on return, rolled back on a throw):
+
+```java
+public class PlayerRepository extends HibernateRepository<PlayerEntity, String> {
+    public PlayerRepository(SessionFactory sessions, Database database) {
+        super(sessions, database, PlayerEntity.class);
+    }
+
+    public CompletableFuture<Optional<PlayerEntity>> findByName(String name) {
+        return read(session -> session
+                .createSelectionQuery("from PlayerEntity where name = :name", PlayerEntity.class)
+                .setParameter("name", name)
+                .uniqueResultOptional());
+    }
+}
+```
+
+| Method | Returns | Notes |
+|---|---|---|
+| `save(entity)` | `T` | Insert or update (`merge`). Use the **returned** instance: it is the managed copy, and the one carrying a generated id. |
+| `saveAll(entities)` | `List<T>` | One transaction: all saved, or none. |
+| `findById(id)` | `Optional<T>` | |
+| `findAllById(ids)` | `List<T>` | One query; ids with no row are left out. |
+| `findAll()` | `List<T>` | |
+| `existsById(id)` | `Boolean` | |
+| `count()` | `Long` | |
+| `deleteById(id)` | `Boolean` | Whether there was something to delete. |
+| `delete(entity)` | `Void` | Works with detached entities, such as the ones a repository returns. |
+| `deleteAll()` | `Integer` | One bulk `delete`: JPA callbacks and cascades do **not** run. |
+
+The constructor checks that the class is an entity of that `SessionFactory`, so
+forgetting it in `CoffeeHibernate.sessionFactory(db, ...)` fails right there
+rather than on the first query. Failures complete the future with a
+`DatabaseException` carrying Hibernate's message.
+
+Four things to keep in mind:
+
+1. **Returned entities are detached.** Their session is closed by the time the
+   future completes, so reading a `LAZY` association afterwards throws
+   `LazyInitializationException`. Fetch what you need inside `read(...)`, with
+   a `join fetch` query.
+2. **Futures complete on a database thread**, not the server's. Get back to it
+   before touching the world: `server.execute(...)` on Forge and NeoForge,
+   Bukkit's scheduler on Paper.
+3. **`save` merges.** The object you pass does not become managed; keep the
+   returned one. (Spring users: here it is never the same object.)
+4. **One call is one transaction.** `findById` followed by `save` is two; put
+   both inside one `write(...)` when they must happen together.
+
+There are **no queries derived from method names**: a `findByName` is never
+generated for you. Write it with `read(...)`, as above.
 
 How it ships:
 
