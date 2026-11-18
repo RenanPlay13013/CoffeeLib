@@ -63,6 +63,14 @@ public interface Database extends AutoCloseable {
 
     boolean isClosed();
 
+    /**
+     * Closes {@code resource} when this database closes - after the work
+     * already queued has run, before the pool goes - for something built on
+     * {@link #dataSource()}, such as a Hibernate {@code SessionFactory}.
+     * Resources close in the reverse of the order they were added.
+     */
+    void closeWith(AutoCloseable resource);
+
     /** Closes the pool and stops the executor. Work already queued fails with a {@link DatabaseException}. */
     @Override
     void close();

@@ -32,7 +32,7 @@ tasks.jar {
 
 tasks.processResources {
     filesMatching("plugin.yml") {
-        expand("version" to project.version)
+        expand("version" to project.version, "hibernateVersion" to project.property("hibernate_version"))
     }
 }
 
@@ -66,6 +66,8 @@ dependencies {
     // YamlConfiguration are identical at this layer, so this one module still
     // covers 1.8.x -> latest without recompiling per version.
     compileOnly("org.spigotmc:spigot-api:1.8.8-R0.1-SNAPSHOT")
+    // CoffeeHibernate compiles against it; the server downloads it (plugin.yml libraries).
+    compileOnly("org.hibernate.orm:hibernate-core:${project.property("hibernate_version")}")
     compileOnly("me.clip:placeholderapi:2.11.6") {
         isTransitive = false
     }

@@ -38,6 +38,13 @@ dependencies {
     // the Forge and NeoForge jars nest it (META-INF/jarjar), where the loader picks one
     // copy among every mod that nests it.
     testImplementation("org.xerial:sqlite-jdbc:${property("sqlite_jdbc_version")}")
+
+    // Hibernate, for CoffeeHibernate: compiled against only. The Forge and NeoForge jars
+    // nest it and the Paper plugin downloads it as a library, so it is never in this jar.
+    compileOnly("org.hibernate.orm:hibernate-core:${property("hibernate_version")}")
+    compileOnly("org.hibernate.orm:hibernate-community-dialects:${property("hibernate_version")}")
+    testImplementation("org.hibernate.orm:hibernate-core:${property("hibernate_version")}")
+    testImplementation("org.hibernate.orm:hibernate-community-dialects:${property("hibernate_version")}")
 }
 
 // Compiled against as they are; relocated only in the jar.

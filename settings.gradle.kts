@@ -18,6 +18,7 @@ include(
     "coffeelib-api",
     "coffeelib-core",
     "coffeelib-database",
+    "coffeelib-hibernate",
     "coffeelib-platform-paper",
     "coffeelib-platform-forge-1.20.1",
     "coffeelib-platform-neoforge-1.21.1"

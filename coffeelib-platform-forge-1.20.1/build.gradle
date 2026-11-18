@@ -94,8 +94,8 @@ dependencies {
     compileOnly(project(path: ':coffeelib-database', configuration: 'shadowRuntimeElements'))
     bundled(project(path: ':coffeelib-database', configuration: 'shadowRuntimeElements'))
     minecraftLibrary(project(path: ':coffeelib-database', configuration: 'shadowRuntimeElements'))
-    // SQLite: nested in the jar (see sqlite-jarjar.gradle), which dev runs do not read.
-    minecraftLibrary "org.xerial:sqlite-jdbc:${rootProject.property('sqlite_jdbc_version')}"
+    // SQLite and Hibernate: nested in the jar, and on the dev-run classpath by
+    // nested-libraries.gradle, since dev runs do not read jar-in-jar.
 
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
 
@@ -205,4 +205,4 @@ tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
 }
 
-apply from: rootProject.file('gradle/sqlite-jarjar.gradle')
+apply from: rootProject.file('gradle/nested-libraries.gradle')

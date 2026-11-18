@@ -1,0 +1,168 @@
+// Libraries nested in a Forge/NeoForge mod jar the way the loaders' own jar-in-jar
+// expects: each jar under META-INF/jarjar/ plus a metadata.json naming them all. Among
+// every mod that nests the same library, the loader keeps one copy (the highest
+// version), so two mods bringing it cannot clash.
+//
+// Nested rather than bundled into CoffeeLib's own classes, as the pool and the server
+// drivers are, because these cannot be relocated:
+//
+//  * SQLite's native library binds to the org.sqlite package by name;
+//  * Hibernate and its dependencies are APIs a mod compiles against and uses directly
+//    (Session, @Entity...), so they keep their real names. Nesting them here is what
+//    lets a mod use Hibernate without packaging it itself.
+//
+// Hibernate's jars are nested as game libraries (FMLModType: GAMELIBRARY, added here
+// to the published jars), so they load in the game layer next to the mods whose
+// entities they proxy - see coffeelib-hibernate, which also explains why hibernate-core
+// itself comes from there, with ANTLR relocated inside it.
+//
+// Applied by both Forge-like platform builds. Dev runs do not read jar-in-jar; each
+// build puts gameLibraries' output on its own dev-run classpath.
+
+evaluationDependsOn(':coffeelib-hibernate')
+
+def sqliteVersion = rootProject.property('sqlite_jdbc_version')
+def hibernateVersion = rootProject.property('hibernate_version')
+
+configurations {
+    nestedPlain {
+        transitive = false
+    }
+    nestedHibernate {
+        // Comes from coffeelib-hibernate instead, relocated inside hibernate-core - for
+        // whichever Hibernate artifact would bring it.
+        exclude group: 'org.antlr', module: 'antlr4-runtime'
+    }
+}
+
+// The loaders resolve these as JPMS modules, and jakarta.transaction-api 2.0.1 - the one
+// Hibernate asks for - declares hard requirements on CDI and interceptor modules that
+// nothing provides, so the game would not start ("Module jakarta.interceptor not found,
+// required by jakarta.transaction"). 2.0.0 is the same API as an automatic module, with
+// no such requirements. Forced everywhere in this build, including what mods compile against.
+configurations.configureEach {
+    resolutionStrategy.force 'jakarta.transaction:jakarta.transaction-api:2.0.0'
+}
+
+dependencies {
+    nestedPlain "org.xerial:sqlite-jdbc:${sqliteVersion}"
+    // Replaced by coffeelib-hibernate's repack when nested (see gameLibraries).
+    nestedHibernate "org.hibernate.orm:hibernate-core:${hibernateVersion}"
+    // SQLiteDialect, maintained by the Hibernate project in its community dialects.
+    nestedHibernate "org.hibernate.orm:hibernate-community-dialects:${hibernateVersion}"
+}
+
+def jarJarDir = layout.buildDirectory.dir('generated/nestedLibraries')
+def gameLibrariesDir = layout.buildDirectory.dir('generated/gameLibraries')
+def repackedHibernate = project(':coffeelib-hibernate').tasks.named('shadowJar')
+
+/**
+ * A copy of {@code source} whose manifest also says FMLModType: GAMELIBRARY. The rest of
+ * the manifest is kept - Automatic-Module-Name above all, which names the module - except
+ * a Multi-Release flag with nothing behind it, and signature files are dropped, since the
+ * jar is no longer the one that was signed.
+ */
+def markAsGameLibrary(File source, File target) {
+    new java.util.jar.JarFile(source).withCloseable { jar ->
+        def manifest = jar.manifest != null ? new java.util.jar.Manifest(jar.manifest) : new java.util.jar.Manifest()
+        manifest.mainAttributes.putIfAbsent(java.util.jar.Attributes.Name.MANIFEST_VERSION, '1.0')
+        manifest.mainAttributes.putValue('FMLModType', 'GAMELIBRARY')
+        // jandex 3.2.0 says Multi-Release: true but has no META-INF/versions/, which Forge
+        // 1.20.1's jar handler refuses outright ("NoSuchFileException: /META-INF/versions").
+        if (jar.entries().toList().every { !it.name.startsWith('META-INF/versions/') }) {
+            manifest.mainAttributes.remove(new java.util.jar.Attributes.Name('Multi-Release'))
+        }
+        new java.util.jar.JarOutputStream(new FileOutputStream(target), manifest).withCloseable { output ->
+            jar.entries().each { entry ->
+                def name = entry.name
+                if (name.equalsIgnoreCase('META-INF/MANIFEST.MF') || name ==~ /(?i)META-INF\/[^\/]+\.(SF|DSA|RSA|EC)/) {
+                    return
+                }
+                output.putNextEntry(new java.util.jar.JarEntry(name))
+                jar.getInputStream(entry).withCloseable { output << it }
+                output.closeEntry()
+            }
+        }
+    }
+}
+
+/** Hibernate's jars with FMLModType: GAMELIBRARY, hibernate-core replaced by the repacked one. */
+def gameLibraries = tasks.register('gameLibraries') {
+    dependsOn repackedHibernate
+    inputs.files(configurations.nestedHibernate)
+    inputs.files(repackedHibernate)
+    outputs.dir(gameLibrariesDir)
+    doLast {
+        def out = gameLibrariesDir.get().asFile
+        project.delete(out)
+        out.mkdirs()
+        configurations.nestedHibernate.resolvedConfiguration.resolvedArtifacts.each { artifact ->
+            def id = artifact.moduleVersion.id
+            if (id.group == 'org.hibernate.orm' && id.name == 'hibernate-core') {
+                return // the repacked one, below
+            }
+            markAsGameLibrary(artifact.file, new File(out, artifact.file.name))
+        }
+        project.copy {
+            from repackedHibernate.get().archiveFile
+            into out
+            rename { "hibernate-core-${hibernateVersion}.jar" }
+        }
+    }
+}
+
+def nestedLibrariesMetadata = tasks.register('nestedLibrariesMetadata') {
+    dependsOn gameLibraries
+    inputs.files(configurations.nestedPlain)
+    inputs.files(configurations.nestedHibernate)
+    outputs.dir(jarJarDir)
+    doLast {
+        def entries = []
+        def entry = { group, name, version, fileName ->
+            entries << [
+                    identifier  : [group: group, artifact: name],
+                    version     : [range: "[${version},)".toString(), artifactVersion: version],
+                    path        : "META-INF/jarjar/${fileName}".toString(),
+                    isObfuscated: false
+            ]
+        }
+        configurations.nestedPlain.resolvedConfiguration.resolvedArtifacts.each { a ->
+            entry(a.moduleVersion.id.group, a.moduleVersion.id.name, a.moduleVersion.id.version, a.file.name)
+        }
+        configurations.nestedHibernate.resolvedConfiguration.resolvedArtifacts.each { a ->
+            entry(a.moduleVersion.id.group, a.moduleVersion.id.name, a.moduleVersion.id.version, a.file.name)
+        }
+        def file = jarJarDir.get().file('META-INF/jarjar/metadata.json').asFile
+        file.parentFile.mkdirs()
+        file.text = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson([jars: entries]))
+    }
+}
+
+tasks.named('jar', Jar).configure {
+    dependsOn nestedLibrariesMetadata
+    from(jarJarDir)
+    from(configurations.nestedPlain) {
+        into 'META-INF/jarjar'
+    }
+    from(gameLibrariesDir) {
+        into 'META-INF/jarjar'
+    }
+}
+
+// What the mod compiles against: the real Hibernate API.
+dependencies {
+    compileOnly "org.hibernate.orm:hibernate-core:${hibernateVersion}"
+    compileOnly "org.hibernate.orm:hibernate-community-dialects:${hibernateVersion}"
+}
+
+// Dev runs do not read jar-in-jar, so SQLite also goes on CoffeeLib's own dev-run
+// classpath. Hibernate does not: there the loaders put classpath libraries in the boot
+// layer, where Hibernate cannot proxy a mod's entities, so it would only fail later and
+// less clearly. A mod that depends on CoffeeLib gets Hibernate in its dev runs anyway -
+// CoffeeLib's jar is loaded there as a mod, and its nested jars with it.
+def nestedDevLibraries = files(configurations.nestedPlain)
+['additionalRuntimeClasspath', 'minecraftLibrary'].each { name ->
+    if (configurations.findByName(name) != null) {
+        dependencies.add(name, nestedDevLibraries)
+    }
+}

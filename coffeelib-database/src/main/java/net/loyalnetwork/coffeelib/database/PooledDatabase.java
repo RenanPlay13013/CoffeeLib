@@ -37,6 +37,7 @@ final class PooledDatabase implements Database {
     private final DataSource dataSource;
     private final AutoCloseable pool;
     private final ExecutorService executor;
+    private final java.util.Deque<AutoCloseable> dependents = new java.util.concurrent.ConcurrentLinkedDeque<>();
     private volatile boolean closed;
 
     private PooledDatabase(String ownerId, ClassLoader ownerLoader, DatabaseType type, DataSource dataSource,
@@ -242,6 +243,11 @@ final class PooledDatabase implements Database {
     }
 
     @Override
+    public void closeWith(AutoCloseable resource) {
+        dependents.push(java.util.Objects.requireNonNull(resource, "resource"));
+    }
+
+    @Override
     public boolean isClosed() {
         return closed;
     }
@@ -260,6 +266,14 @@ final class PooledDatabase implements Database {
         } catch (InterruptedException e) {
             executor.shutdownNow();
             Thread.currentThread().interrupt();
+        }
+        for (AutoCloseable dependent; (dependent = dependents.poll()) != null; ) {
+            try {
+                dependent.close();
+            } catch (Exception e) {
+                java.util.logging.Logger.getLogger(PooledDatabase.class.getName()).log(java.util.logging.Level.WARNING,
+                        "[CoffeeLib] [" + ownerId + "] Could not close " + dependent + " before its database", e);
+            }
         }
         try {
             pool.close();

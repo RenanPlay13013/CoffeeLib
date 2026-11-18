@@ -40,7 +40,7 @@ compartilhado entre donos na mesma JVM.
   conversarem por tipos Java simples em vez de eventos do Forge ou do Bukkit.
 - **MySQL, MariaDB, PostgreSQL, SQLite e H2** — uma conexão em pool
   (HikariCP) por mod ou plugin, num servidor ou num arquivo local, configurada por um `database.yml`, com helpers JDBC assíncronos e um
-  `DataSource` comum para Hibernate, jOOQ ou o que vier por cima.
+  `DataSource` comum, com o Hibernate pronto para usar por cima.
 - **Integração real com plataformas** — Forge e NeoForge se integram com seus
   sistemas nativos de config, então `/forge config` e o ConfigTracker enxergam
   de verdade.
@@ -59,12 +59,13 @@ compartilhado entre donos na mesma JVM.
 
 ## Arquitetura
 
-O CoffeeLib é dividido em seis módulos sob `net.loyalnetwork`:
+O CoffeeLib é dividido em sete módulos sob `net.loyalnetwork`:
 
 ```
 coffeelib-api                    interfaces, anotações, exceções (sem dependências)
 coffeelib-core                   implementações agnósticas de plataforma (Java puro)
 coffeelib-database               pools de conexão; HikariCP, MariaDB, PostgreSQL e H2 relocados dentro
+coffeelib-hibernate              hibernate-core reempacotado para os loaders forge-like (interno)
 coffeelib-platform-paper         backend Paper (Configurate YAML)
 coffeelib-platform-forge-1.20.1  integração Forge 1.20.1 (Java 17)
 coffeelib-platform-neoforge-1.21.1 integração NeoForge 1.21.1 (Java 21)
@@ -95,15 +96,15 @@ repositories {
 
 dependencies {
     // Paper
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-paper:3.6")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-paper:3.7")
     // Forge 1.20.1
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-forge-1.20.1:3.6")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-forge-1.20.1:3.7")
     // NeoForge 1.21.1
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-neoforge-1.21.1:3.6")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-neoforge-1.21.1:3.7")
     // Ou apenas o core agnóstico de formato (config + DI, sem backend de plataforma)
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-core:3.6")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-core:3.7")
     // Ou só as interfaces e anotações
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-api:3.6")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-api:3.7")
 }
 ```
 
@@ -802,32 +803,65 @@ um banco precisam de MySQL, MariaDB ou PostgreSQL.
 > buscá-la, então uma instalação padrão conecta. Para um banco numa rede que
 > não é confiável, configure `sslMode`.
 
-### Usando Hibernate (ou outro JPA/ORM)
+### Hibernate
 
-A CoffeeLib não embute o Hibernate (ele é grande, e a maioria dos mods nunca
-precisa dele), mas ele roda no pool da CoffeeLib como está. Embuta o Hibernate
-no seu próprio jar (com `jarJar` no Forge/NeoForge, com shade no Paper) e
-entregue o `DataSource` a ele:
+O Hibernate ORM 6.6 vem com a CoffeeLib, então um mod ou plugin o usa sem
+empacotar nada: compile contra ele e monte um `SessionFactory` sobre um banco da
+CoffeeLib.
 
-```java
-Database db = CoffeeLib.database(container).open();
-
-Configuration configuration = new Configuration()
-        .addAnnotatedClass(CrateKey.class)
-        .setProperty(AvailableSettings.HBM2DDL_AUTO, "update");
-configuration.getProperties().put(AvailableSettings.DATASOURCE, db.dataSource());   // o pool da CoffeeLib
-SessionFactory sessions = configuration.buildSessionFactory();
-
-db.executor().execute(() -> sessions.inTransaction(session -> session.persist(new CrateKey(...))));
+```groovy
+compileOnly 'org.hibernate.orm:hibernate-core:6.6.4.Final'   // só isso: a CoffeeLib traz o Hibernate em tempo de execução
+// compileOnly 'org.hibernate.orm:hibernate-community-dialects:6.6.4.Final' só se você citar o SQLiteDialect por conta própria
 ```
 
-* Deixe o Hibernate detectar o dialeto pela conexão, ou defina
-  `hibernate.dialect` como `MySQLDialect`, `MariaDBDialect` ou
-  `PostgreSQLDialect`.
-* Rode as sessions em `db.executor()` (ou em threads suas), não na thread do
-  servidor. O context class loader dessas threads é o do seu mod ou plugin, que
-  é por onde o Hibernate encontra as suas classes de entidade.
-* Feche o `SessionFactory` antes do banco (no `onDisable`, no Paper).
+```java
+@Entity
+public class Home {
+    @Id @GeneratedValue(strategy = GenerationType.IDENTITY) private Long id;
+    private String player;
+    private String name;
+    private double x, y, z;
+    // um construtor sem argumentos, getters...
+}
+
+Database db = CoffeeLib.database(container).open();
+SessionFactory sessions = CoffeeHibernate.sessionFactory(db, Home.class);   // tabelas criadas/atualizadas para bater
+
+CompletableFuture.runAsync(() -> sessions.inTransaction(session -> session.persist(home)), db.executor())
+        .whenComplete((ok, error) -> server.execute(() -> { /* de volta à thread do servidor */ }));
+```
+
+* `CoffeeHibernate.sessionFactory` entrega ao Hibernate o pool da CoffeeLib
+  como conexões, encontra suas entidades pelo seu próprio class loader e fecha o
+  `SessionFactory` junto com o banco. A sobrecarga que recebe um
+  `Consumer<Configuration>` muda o resto (`hbm2ddl.auto`, cache, nomes); o
+  padrão é `update`.
+* Todo tipo de banco funciona. O dialeto é detectado pela conexão no MySQL,
+  MariaDB, PostgreSQL e H2; no SQLite, a CoffeeLib escolhe o `SQLiteDialect`
+  dos dialetos da comunidade do próprio Hibernate (`hibernate-community-dialects`,
+  distribuído junto). Os dialetos da comunidade têm menos cobertura que os
+  principais, e o SQLite aceita uma escrita por vez, então para um banco embutido
+  com muitas entidades relacionadas o H2 é a escolha mais segura.
+* Rode as sessions em `db.executor()` (ou em threads suas), nunca na thread do
+  servidor.
+* Uma associação lazy vira um proxy que carrega numa **chamada de método**: leia
+  os dados dela por getters, não por campos públicos.
+
+Como ele é distribuído:
+
+* **Forge e NeoForge**: aninhado no jar da CoffeeLib (`META-INF/jarjar`) como
+  *game libraries*, para carregar junto dos mods cujas entidades ele usa em
+  proxies. Os dev runs de um mod também recebem, já que o jar da CoffeeLib é
+  carregado ali como mod. Dois ajustes fazem isso funcionar com o sistema de
+  módulos, ambos invisíveis para o mod: o ANTLR vai relocado dentro do
+  `hibernate-core` (o Forge 1.20.1 traz um ANTLR 4.9 que o parser de consultas do
+  Hibernate não consegue usar), e o `jakarta.transaction-api` é o 2.0.0, a mesma
+  API sem as exigências do 2.0.1 sobre módulos de CDI que ninguém fornece.
+* **Paper/Spigot 1.17+**: uma entrada `libraries` do plugin da CoffeeLib, que o
+  servidor baixa do Maven Central na primeira subida. Declare
+  `depend: [CoffeeLib]` no seu `plugin.yml` para enxergá-lo.
+
+O Hibernate acrescenta cerca de 18 MB aos jars do Forge e do NeoForge.
 
 ---
 
