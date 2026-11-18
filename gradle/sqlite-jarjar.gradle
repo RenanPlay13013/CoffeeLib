@@ -1,0 +1,49 @@
+// SQLite's JDBC driver, nested in a Forge/NeoForge mod jar the way the loaders' own
+// jar-in-jar expects: the jar under META-INF/jarjar/ plus a metadata.json naming it.
+//
+// Not bundled like the other libraries, because it cannot be relocated: its native
+// library binds to the org.sqlite package by name. Nested, the loader picks one copy
+// among every mod that nests sqlite-jdbc - the highest version - instead of two mods'
+// copies of the same package failing to load side by side.
+//
+// Applied by both Forge-like platform builds; each adds sqlite-jdbc to its own dev-run
+// classpath, since dev runs do not read jar-in-jar.
+
+def sqliteVersion = rootProject.property('sqlite_jdbc_version')
+
+configurations {
+    nestedSqlite {
+        transitive = false
+    }
+}
+
+dependencies {
+    nestedSqlite "org.xerial:sqlite-jdbc:${sqliteVersion}"
+}
+
+def jarJarDir = layout.buildDirectory.dir('generated/sqliteJarJar')
+
+def sqliteJarJarMetadata = tasks.register('sqliteJarJarMetadata') {
+    inputs.property('version', sqliteVersion)
+    outputs.dir(jarJarDir)
+    doLast {
+        def file = jarJarDir.get().file('META-INF/jarjar/metadata.json').asFile
+        file.parentFile.mkdirs()
+        file.text = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson([
+                jars: [[
+                        identifier  : [group: 'org.xerial', artifact: 'sqlite-jdbc'],
+                        version     : [range: "[${sqliteVersion},)".toString(), artifactVersion: sqliteVersion],
+                        path        : "META-INF/jarjar/sqlite-jdbc-${sqliteVersion}.jar".toString(),
+                        isObfuscated: false
+                ]]
+        ]))
+    }
+}
+
+tasks.named('jar', Jar).configure {
+    dependsOn sqliteJarJarMetadata
+    from(jarJarDir)
+    from(configurations.nestedSqlite) {
+        into 'META-INF/jarjar'
+    }
+}

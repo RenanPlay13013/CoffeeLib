@@ -111,7 +111,8 @@ public final class CoffeeLib {
      */
     public static DatabaseManager database(JavaPlugin plugin, Path configDirectory) {
         return new DefaultDatabaseManager(plugin.getName(), () -> forPlugin(plugin, configDirectory),
-                plugin.getClass().getClassLoader());
+                plugin.getClass().getClassLoader(),
+                () -> configDirectory != null ? configDirectory : plugin.getDataFolder().toPath());
     }
 
     /**

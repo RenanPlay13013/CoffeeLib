@@ -30,7 +30,14 @@ dependencies {
     shaded("org.slf4j:slf4j-api:2.0.16")
     shaded("org.slf4j:slf4j-jdk14:2.0.16")
 
-    testImplementation("com.h2database:h2:2.3.232")
+    // H2, embedded: pure Java, so relocated like the rest.
+    shaded("com.h2database:h2:2.3.232")
+
+    // SQLite is the exception: its native library binds to the org.sqlite package by name,
+    // so relocating it breaks it. It is not in this jar at all - Paper servers ship it, and
+    // the Forge and NeoForge jars nest it (META-INF/jarjar), where the loader picks one
+    // copy among every mod that nests it.
+    testImplementation("org.xerial:sqlite-jdbc:${property("sqlite_jdbc_version")}")
 }
 
 // Compiled against as they are; relocated only in the jar.
@@ -45,6 +52,7 @@ tasks.shadowJar {
     relocate("org.mariadb.jdbc", "$libs.mariadb")
     relocate("org.postgresql", "$libs.postgresql")
     relocate("org.slf4j", "$libs.slf4j")
+    relocate("org.h2", "$libs.h2")
     // java.sql.Driver and SLF4J's provider are found through META-INF/services; this
     // rewrites those files along with the classes they name.
     mergeServiceFiles()

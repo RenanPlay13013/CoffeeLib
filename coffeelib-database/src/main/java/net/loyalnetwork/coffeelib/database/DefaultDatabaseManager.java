@@ -6,6 +6,7 @@ import net.loyalnetwork.coffeelib.api.database.DatabaseException;
 import net.loyalnetwork.coffeelib.api.database.DatabaseManager;
 import net.loyalnetwork.coffeelib.api.database.DatabaseSettings;
 
+import java.nio.file.Path;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Supplier;
@@ -20,16 +21,21 @@ public final class DefaultDatabaseManager implements DatabaseManager {
     private final String ownerId;
     private final Supplier<ConfigManager> configs;
     private final ClassLoader ownerLoader;
+    private final Supplier<Path> configDirectory;
 
     /**
      * @param configs     the owner's config manager, asked for only when
      *                    {@link #open()} needs {@code database.yml}
-     * @param ownerLoader the owner's class loader (see {@code PooledDatabase#connect})
+     * @param ownerLoader     the owner's class loader (see {@code PooledDatabase#connect})
+     * @param configDirectory the directory {@code database.yml} is in, which a
+     *                        relative embedded-database file is resolved against
      */
-    public DefaultDatabaseManager(String ownerId, Supplier<ConfigManager> configs, ClassLoader ownerLoader) {
+    public DefaultDatabaseManager(String ownerId, Supplier<ConfigManager> configs, ClassLoader ownerLoader,
+                                  Supplier<Path> configDirectory) {
         this.ownerId = Objects.requireNonNull(ownerId, "ownerId");
         this.configs = configs;
         this.ownerLoader = ownerLoader;
+        this.configDirectory = configDirectory;
     }
 
     @Override
@@ -46,9 +52,21 @@ public final class DefaultDatabaseManager implements DatabaseManager {
     @Override
     public Database open(DatabaseSettings settings) {
         Objects.requireNonNull(settings, "settings");
-        PooledDatabase database = PooledDatabase.connect(ownerId, ownerLoader, settings);
+        PooledDatabase database = PooledDatabase.connect(ownerId, ownerLoader, resolveFile(settings));
         OpenDatabases.add(ownerId, database);
         return database;
+    }
+
+    /** An embedded database's relative file, made absolute against the owner's config directory. */
+    DatabaseSettings resolveFile(DatabaseSettings settings) {
+        if (!settings.type().isEmbedded() || settings.jdbcUrl() != null) {
+            return settings;
+        }
+        Path file = Path.of(settings.file());
+        if (file.isAbsolute() || configDirectory == null) {
+            return settings;
+        }
+        return settings.withFile(configDirectory.get().resolve(file).toAbsolutePath().toString());
     }
 
     /** The open databases of every owner, for {@code /coffeelib} and diagnostics. */

@@ -12,6 +12,9 @@ import java.util.Objects;
  *         .username("crates").password(System.getenv("CRATES_DB_PASSWORD"))
  *         .build();
  * }</pre>
+ * An embedded database needs no server, only a file:
+ * {@code DatabaseSettings.builder(DatabaseType.SQLITE).file("homes").build()}.
+ * <p>
  * Driver properties ({@link Builder#property}) are passed to the JDBC driver
  * as they are - {@code sslMode}, {@code connectTimeout} and so on, named as
  * that driver names them.
@@ -28,6 +31,7 @@ public final class DatabaseSettings {
     private final long connectionTimeoutMillis;
     private final Map<String, String> properties;
     private final String jdbcUrl;
+    private final String file;
 
     private DatabaseSettings(Builder builder) {
         this.type = builder.type;
@@ -40,6 +44,7 @@ public final class DatabaseSettings {
         this.connectionTimeoutMillis = builder.connectionTimeoutMillis;
         this.properties = Map.copyOf(builder.properties);
         this.jdbcUrl = builder.jdbcUrl;
+        this.file = builder.file;
     }
 
     public static Builder builder(DatabaseType type) {
@@ -87,11 +92,38 @@ public final class DatabaseSettings {
         return jdbcUrl;
     }
 
+    /**
+     * Where an {@link DatabaseType#isEmbedded() embedded} database keeps its
+     * data: a path, without extension for H2 (which adds {@code .mv.db}). A
+     * relative path is resolved against the owner's config directory - the
+     * one {@code database.yml} is in. Ignored for server databases.
+     */
+    public String file() {
+        return file;
+    }
+
+    /** A copy with another {@link #file()} - how a relative path gets resolved. */
+    public DatabaseSettings withFile(String file) {
+        Builder builder = toBuilder();
+        builder.file(file);
+        return builder.build();
+    }
+
+    private Builder toBuilder() {
+        Builder builder = new Builder(type).host(host).port(port).database(database).username(username)
+                .password(password).poolSize(poolSize).connectionTimeoutMillis(connectionTimeoutMillis)
+                .jdbcUrl(jdbcUrl).file(file);
+        properties.forEach(builder::property);
+        return builder;
+    }
+
     /** Settings with the password left out, so they can be logged. */
     @Override
     public String toString() {
-        return "DatabaseSettings[" + type + " " + (jdbcUrl != null ? jdbcUrl : host + ":" + port + "/" + database)
-                + ", user=" + username + ", poolSize=" + poolSize + "]";
+        String where = jdbcUrl != null ? jdbcUrl
+                : type.isEmbedded() ? file
+                : host + ":" + port + "/" + database;
+        return "DatabaseSettings[" + type + " " + where + ", user=" + username + ", poolSize=" + poolSize + "]";
     }
 
     public static final class Builder {
@@ -105,6 +137,7 @@ public final class DatabaseSettings {
         private long connectionTimeoutMillis = 10_000;
         private final Map<String, String> properties = new LinkedHashMap<>();
         private String jdbcUrl;
+        private String file = "data";
 
         private Builder(DatabaseType type) {
             this.type = Objects.requireNonNull(type, "type");
@@ -169,6 +202,15 @@ public final class DatabaseSettings {
          */
         public Builder jdbcUrl(String jdbcUrl) {
             this.jdbcUrl = jdbcUrl == null || jdbcUrl.isBlank() ? null : jdbcUrl;
+            return this;
+        }
+
+        /**
+         * The file of an embedded database (SQLite, H2): {@code "data"} by
+         * default, relative to the owner's config directory.
+         */
+        public Builder file(String file) {
+            this.file = Objects.requireNonNull(file, "file");
             return this;
         }
 

@@ -198,10 +198,10 @@ public final class CoffeeLib {
         // By default database.yml goes in config/<modid>/: every mod has one, so the
         // loader's own config/ would have them all overwrite each other. Every mod's
         // classes are visible from the loader that loaded CoffeeLib's own.
-        return new DefaultDatabaseManager(modId,
-                () -> detached(modId, configDirectory != null ? configDirectory
-                        : FMLPaths.CONFIGDIR.get().resolve(modId)),
-                CoffeeLib.class.getClassLoader());
+        Supplier<Path> directory = () -> configDirectory != null ? configDirectory
+                : FMLPaths.CONFIGDIR.get().resolve(modId);
+        return new DefaultDatabaseManager(modId, () -> detached(modId, directory.get()),
+                CoffeeLib.class.getClassLoader(), directory);
     }
 
     public static EventBus eventBus(ModContainer container) {

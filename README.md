@@ -35,8 +35,8 @@ shared between owners in the same JVM.
 - **An event bus of its own** — one channel shared by every mod and plugin on
   the library, with priorities, cancellation and `@Subscribe` handlers, so two
   owners talk through plain Java types instead of Forge or Bukkit events.
-- **MySQL, MariaDB and PostgreSQL** — a pooled connection (HikariCP) per mod
-  or plugin, configured from a `database.yml`, with async JDBC helpers and a
+- **MySQL, MariaDB, PostgreSQL, SQLite and H2** — a pooled connection
+  (HikariCP) per mod or plugin, to a server or to a local file, configured from a `database.yml`, with async JDBC helpers and a
   plain `DataSource` for Hibernate, jOOQ or anything else on top.
 - **Real platform integration** — Forge and NeoForge plug straight into their
   native config systems so `/forge config` and the ConfigTracker see the real
@@ -60,7 +60,7 @@ CoffeeLib is split into six modules under `net.loyalnetwork`:
 ```
 coffeelib-api                    interfaces, annotations, exceptions (no deps)
 coffeelib-core                   platform-agnostic implementations (pure Java)
-coffeelib-database               connection pools, HikariCP and the drivers relocated inside
+coffeelib-database               connection pools; HikariCP, MariaDB, PostgreSQL and H2 relocated inside
 coffeelib-platform-paper         Paper backend (Configurate YAML)
 coffeelib-platform-forge-1.20.1  Forge 1.20.1 integration (Java 17)
 coffeelib-platform-neoforge-1.21.1 NeoForge 1.21.1 integration (Java 21)
@@ -95,15 +95,15 @@ repositories {
 
 dependencies {
     // Paper
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-paper:3.5")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-paper:3.6")
     // Forge 1.20.1
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-forge-1.20.1:3.5")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-forge-1.20.1:3.6")
     // NeoForge 1.21.1
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-neoforge-1.21.1:3.5")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-neoforge-1.21.1:3.6")
     // Or just the format-agnostic core (config + DI, no platform backend)
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-core:3.5")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-core:3.6")
     // Or only the interfaces and annotations
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-api:3.5")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-api:3.6")
 }
 ```
 
@@ -701,7 +701,8 @@ Where CoffeeLib now checks nodes:
 ## Database
 
 A connection pool per mod or plugin, for **MySQL**, **MariaDB** and
-**PostgreSQL**. CoffeeLib's part ends at a plain JDBC `DataSource`: use its
+**PostgreSQL** servers, or **SQLite** and **H2** in a local file, with no
+server at all. CoffeeLib's part ends at a plain JDBC `DataSource`: use its
 small helpers for SQL, or put Hibernate, jOOQ or JDBI on top. Nothing to add
 to your build: HikariCP and the drivers ship inside the platform jars,
 relocated under `net.loyalnetwork.coffeelib.libs`, so they cannot clash with a
@@ -734,8 +735,10 @@ The file, created with defaults on first use (`config/<modid>/database.yml` on
 Forge/NeoForge, the plugin's data folder on Paper):
 
 ```yaml
-# MYSQL, MARIADB or POSTGRESQL
+# MYSQL, MARIADB or POSTGRESQL (a server), or SQLITE or H2 (a local file, no server needed)
 type: MYSQL
+# SQLITE/H2 only: the file, relative to this one's folder (H2 adds .mv.db)
+file: data
 host: localhost
 # 0 = the type's usual port (3306 for MySQL/MariaDB, 5432 for PostgreSQL)
 port: 0
@@ -757,6 +760,29 @@ Settings of your own (kept in your config, or built in code) go through
 `databases.open(DatabaseSettings.builder(DatabaseType.POSTGRESQL).host(...)...build())`.
 `properties` are passed to the driver as they are: `sslMode: verify-full` for
 MySQL/MariaDB, `sslmode: verify-full` for PostgreSQL, and so on.
+
+### Embedded: SQLite and H2
+
+For data that outgrows a config but does not need a server (homes, a
+`/back` location, per-player stats), set `type: SQLITE` or `type: H2`: the
+database is a file next to `database.yml` (`file: data`, or a path of your own;
+relative paths are resolved against that folder). Host, port and credentials
+are ignored. The same `Database` API and the same SQL work as with a server, so
+moving to MySQL later is a change in `database.yml`, plus any SQL that differs
+between them.
+
+* **SQLite** writes with one connection at a time, so its pool holds a single
+  connection whatever `poolSize` says, in WAL mode, waiting up to 5 s on a busy
+  file instead of failing. Its driver carries native code bound to its own
+  package name, so it cannot be relocated like the rest: on Paper CoffeeLib uses
+  the copy the server ships; on Forge and NeoForge it is nested in CoffeeLib's
+  jar (`META-INF/jarjar`), and the loader keeps one copy when other mods nest it
+  too.
+* **H2** is pure Java, bundled and relocated like the server drivers, and keeps
+  everything in `<file>.mv.db`.
+
+Either is for one server process: two servers sharing a database need MySQL,
+MariaDB or PostgreSQL.
 
 > **MySQL 8 without TLS.** MySQL 8 authenticates with `caching_sha2_password`,
 > which over a plain connection needs the server's RSA key. Unless you

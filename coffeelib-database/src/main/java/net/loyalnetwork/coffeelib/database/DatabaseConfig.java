@@ -14,8 +14,11 @@ import java.util.Map;
 @ConfigFile(value = "database", format = ConfigFormat.YAML)
 public final class DatabaseConfig {
 
-    @Comment("MYSQL, MARIADB or POSTGRESQL")
+    @Comment("MYSQL, MARIADB or POSTGRESQL (a server), or SQLITE or H2 (a local file, no server needed)")
     public DatabaseType type = DatabaseType.MYSQL;
+
+    @Comment("SQLITE/H2 only: the file, relative to this one's folder (H2 adds .mv.db)")
+    public String file = "data";
 
     public String host = "localhost";
 
@@ -54,7 +57,8 @@ public final class DatabaseConfig {
                 .password(Environment.resolve(password, "password"))
                 .poolSize(poolSize)
                 .connectionTimeoutMillis(connectionTimeoutMillis)
-                .jdbcUrl(Environment.resolve(jdbcUrl, "jdbcUrl"));
+                .jdbcUrl(Environment.resolve(jdbcUrl, "jdbcUrl"))
+                .file(Environment.resolve(file, "file"));
         properties.forEach((name, value) -> builder.property(name, Environment.resolve(value, "properties." + name)));
         return builder.build();
     }

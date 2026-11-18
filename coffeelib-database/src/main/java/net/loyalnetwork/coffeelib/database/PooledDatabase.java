@@ -58,14 +58,30 @@ final class PooledDatabase implements Database {
      *                    owner's classes
      */
     static PooledDatabase connect(String ownerId, ClassLoader ownerLoader, DatabaseSettings settings) {
+        if (settings.type().isEmbedded() && settings.jdbcUrl() == null) {
+            createParent(ownerId, settings.file());
+        }
+        if (settings.type() == DatabaseType.SQLITE && !sqliteAvailable(ownerLoader)) {
+            throw new DatabaseException("[" + ownerId + "] SQLite's driver (org.sqlite.JDBC) is not on the classpath. "
+                    + "CoffeeLib's Forge and NeoForge jars carry it; on Paper it comes with the server");
+        }
         HikariConfig config = new HikariConfig();
         config.setPoolName("CoffeeLib-" + ownerId);
         config.setDriverClassName(JdbcUrls.driverClass(settings.type()));
         config.setJdbcUrl(JdbcUrls.url(settings));
-        config.setUsername(settings.username());
-        config.setPassword(settings.password());
-        config.setMaximumPoolSize(settings.poolSize());
-        config.setMinimumIdle(Math.min(2, settings.poolSize()));
+        if (!settings.type().isEmbedded()) {
+            config.setUsername(settings.username());
+            config.setPassword(settings.password());
+        }
+        // SQLite takes one writer at a time; a second pooled connection would only meet
+        // SQLITE_BUSY. One connection, waiting politely when the file is busy.
+        int poolSize = settings.type() == DatabaseType.SQLITE ? 1 : settings.poolSize();
+        config.setMaximumPoolSize(poolSize);
+        config.setMinimumIdle(Math.min(2, poolSize));
+        if (settings.type() == DatabaseType.SQLITE) {
+            config.addDataSourceProperty("journal_mode", "WAL");
+            config.addDataSourceProperty("busy_timeout", "5000");
+        }
         config.setConnectionTimeout(settings.connectionTimeoutMillis());
         settings.properties().forEach(config::addDataSourceProperty);
         if (needsPublicKeyRetrieval(settings)) {
@@ -77,14 +93,15 @@ final class PooledDatabase implements Database {
             config.addDataSourceProperty("allowPublicKeyRetrieval", "true");
         }
 
-        // The driver is CoffeeLib's own (bundled, relocated): load it from CoffeeLib's loader,
-        // not from the thread's, which on Forge-like platforms may not see it.
+        // Hikari looks a driver up in its own loader, then in the thread's. The bundled
+        // drivers are found in its own; SQLite is not bundled - nested in the mod jar on Forge
+        // and NeoForge, the server's on Paper - and the owner's loader is one that sees it.
         Thread thread = Thread.currentThread();
         ClassLoader previous = thread.getContextClassLoader();
-        thread.setContextClassLoader(PooledDatabase.class.getClassLoader());
+        thread.setContextClassLoader(ownerLoader);
         try {
             HikariDataSource pool = new HikariDataSource(config);
-            return new PooledDatabase(ownerId, ownerLoader, settings.type(), pool, pool, settings.poolSize());
+            return new PooledDatabase(ownerId, ownerLoader, settings.type(), pool, pool, poolSize);
         } catch (HikariPool.PoolInitializationException e) {
             Throwable reason = e.getCause() != null ? e.getCause() : e;
             throw new DatabaseException("[" + ownerId + "] Could not connect to " + settings + ": " + reason.getMessage(), e);
@@ -93,6 +110,32 @@ final class PooledDatabase implements Database {
         } finally {
             thread.setContextClassLoader(previous);
         }
+    }
+
+    private static void createParent(String ownerId, String file) {
+        java.nio.file.Path parent = java.nio.file.Path.of(file).toAbsolutePath().getParent();
+        try {
+            if (parent != null) {
+                java.nio.file.Files.createDirectories(parent);
+            }
+        } catch (java.io.IOException e) {
+            throw new DatabaseException("[" + ownerId + "] Could not create " + parent + " for the database file", e);
+        }
+    }
+
+    private static boolean sqliteAvailable(ClassLoader ownerLoader) {
+        for (ClassLoader loader : new ClassLoader[]{PooledDatabase.class.getClassLoader(), ownerLoader}) {
+            if (loader == null) {
+                continue;
+            }
+            try {
+                Class.forName("org.sqlite.JDBC", false, loader);
+                return true;
+            } catch (ClassNotFoundException | LinkageError ignored) {
+                // try the next loader
+            }
+        }
+        return false;
     }
 
     static boolean needsPublicKeyRetrieval(DatabaseSettings settings) {

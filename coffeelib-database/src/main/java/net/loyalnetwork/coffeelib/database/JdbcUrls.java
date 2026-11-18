@@ -12,9 +12,14 @@ final class JdbcUrls {
 
     static String url(DatabaseSettings settings) {
         String url = settings.jdbcUrl();
+        if (url == null && settings.type().isEmbedded()) {
+            // The file as the manager resolved it; forward slashes work on every OS for both.
+            String file = settings.file().replace('\\', '/');
+            return settings.type() == DatabaseType.SQLITE ? "jdbc:sqlite:" + file : "jdbc:h2:file:" + file;
+        }
         if (url != null) {
             if (!url.startsWith(prefixFor(settings.type()))
-                    && !(settings.type() != DatabaseType.POSTGRESQL && url.startsWith("jdbc:mysql:"))) {
+                    && !(isMysqlFamily(settings.type()) && url.startsWith("jdbc:mysql:"))) {
                 throw new DatabaseException("jdbcUrl '" + url + "' is not a " + settings.type() + " URL; it should start "
                         + "with " + prefixFor(settings.type()));
             }
@@ -28,7 +33,16 @@ final class JdbcUrls {
     }
 
     private static String prefixFor(DatabaseType type) {
-        return type == DatabaseType.POSTGRESQL ? "jdbc:postgresql:" : "jdbc:mariadb:";
+        return switch (type) {
+            case POSTGRESQL -> "jdbc:postgresql:";
+            case SQLITE -> "jdbc:sqlite:";
+            case H2 -> "jdbc:h2:";
+            case MYSQL, MARIADB -> "jdbc:mariadb:";
+        };
+    }
+
+    private static boolean isMysqlFamily(DatabaseType type) {
+        return type == DatabaseType.MYSQL || type == DatabaseType.MARIADB;
     }
 
     private static String withParameter(String url, String flag) {
@@ -41,8 +55,14 @@ final class JdbcUrls {
      * relocated.
      */
     static String driverClass(DatabaseType type) {
-        return type == DatabaseType.POSTGRESQL
-                ? org.postgresql.Driver.class.getName()
-                : org.mariadb.jdbc.Driver.class.getName();
+        return switch (type) {
+            case POSTGRESQL -> org.postgresql.Driver.class.getName();
+            case H2 -> org.h2.Driver.class.getName();
+            // Not relocated into CoffeeLib's classes (SQLite's native code is bound to this
+            // package name, so it cannot be): the server's copy on Paper, a nested jar on
+            // Forge and NeoForge. Named, not linked, so nothing fails until it is used.
+            case SQLITE -> "org.sqlite.JDBC";
+            case MYSQL, MARIADB -> org.mariadb.jdbc.Driver.class.getName();
+        };
     }
 }

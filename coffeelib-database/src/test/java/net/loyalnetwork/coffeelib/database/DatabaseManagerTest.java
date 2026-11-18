@@ -39,7 +39,7 @@ class DatabaseManagerTest {
             }
         };
         DefaultDatabaseManager manager = new DefaultDatabaseManager("testmod", () -> configs,
-                getClass().getClassLoader());
+                getClass().getClassLoader(), null);
         assertEquals(0, loads.get(), "nothing is read until open()");
 
         DatabaseException failed = assertThrows(DatabaseException.class, manager::open);
