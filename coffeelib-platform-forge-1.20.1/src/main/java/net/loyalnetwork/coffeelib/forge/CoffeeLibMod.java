@@ -3,6 +3,9 @@ package net.loyalnetwork.coffeelib.forge;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.GameShuttingDownEvent;
 import net.minecraftforge.event.RegisterCommandsEvent;
+import net.minecraftforge.event.TickEvent;
+import net.minecraftforge.event.server.ServerStoppedEvent;
+import net.minecraftforge.server.ServerLifecycleHooks;
 import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.fml.common.Mod;
 
@@ -33,6 +36,18 @@ public final class CoffeeLibMod {
         // on the database server rather than left for it to time out.
         MinecraftForge.EVENT_BUS.addListener(EventPriority.NORMAL, false, GameShuttingDownEvent.class,
                 event -> net.loyalnetwork.coffeelib.database.OpenDatabases.closeAll());
+        // Every mod's scheduler: driven by the server's ticks, emptied when it stops.
+        net.loyalnetwork.coffeelib.core.scheduler.TickSchedulers.mainThread(() -> {
+            var server = ServerLifecycleHooks.getCurrentServer();
+            return server != null && server.isSameThread();
+        });
+        MinecraftForge.EVENT_BUS.addListener(EventPriority.NORMAL, false, TickEvent.ServerTickEvent.class, event -> {
+            if (event.phase == TickEvent.Phase.END) {
+                net.loyalnetwork.coffeelib.core.scheduler.TickSchedulers.tickAll();
+            }
+        });
+        MinecraftForge.EVENT_BUS.addListener(EventPriority.NORMAL, false, ServerStoppedEvent.class,
+                event -> net.loyalnetwork.coffeelib.core.scheduler.TickSchedulers.stopAll());
     }
 
     private void onRegisterCommands(RegisterCommandsEvent event) {

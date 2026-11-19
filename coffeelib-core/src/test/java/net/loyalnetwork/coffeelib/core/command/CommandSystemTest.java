@@ -8,12 +8,17 @@ import net.loyalnetwork.coffeelib.api.command.annotation.Greedy;
 import net.loyalnetwork.coffeelib.api.command.annotation.Suggest;
 import net.loyalnetwork.coffeelib.api.command.exception.CommandException;
 import net.loyalnetwork.coffeelib.api.exception.CoffeeLibException;
+import net.loyalnetwork.coffeelib.api.permission.PermissionDefault;
+import net.loyalnetwork.coffeelib.api.permission.annotation.Permission;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.Executor;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -34,6 +39,7 @@ class CommandSystemTest {
         final List<String> messages = new ArrayList<>();
         final Set<String> permissions;
         final Object player;
+        boolean available = true;
 
         FakeSource(Object player, String... permissions) {
             this.player = player;
@@ -63,6 +69,11 @@ class CommandSystemTest {
         @Override
         public Object unwrap() {
             return this;
+        }
+
+        @Override
+        public boolean isAvailable() {
+            return available;
         }
     }
 
@@ -113,6 +124,68 @@ class CommandSystemTest {
 
         Collection<String> online() {
             return List.of("Steve", "Alex");
+        }
+    }
+
+    /** Commands whose executors return futures, completed by the test. */
+    @Command("job")
+    static final class JobCommands {
+        final CompletableFuture<Void> pending = new CompletableFuture<>();
+
+        @Command("run")
+        CompletableFuture<Void> run(CommandSource source) {
+            return pending;
+        }
+
+        @Command("done")
+        CompletableFuture<String> done(CommandSource source) {
+            return CompletableFuture.completedFuture("ok");
+        }
+    }
+
+    /** Stands in for the main thread: what is handed over waits until {@link #drain()}. */
+    static final class MainThread implements Executor {
+        final ConcurrentLinkedQueue<Runnable> queued = new ConcurrentLinkedQueue<>();
+
+        @Override
+        public void execute(Runnable task) {
+            queued.add(task);
+        }
+
+        void drain() {
+            Runnable task;
+            while ((task = queued.poll()) != null) {
+                task.run();
+            }
+        }
+    }
+
+    static final class PermissionCommands {
+        @Command(value = "list", permission = "crates.list")
+        @Permission(def = PermissionDefault.EVERYONE, description = "List crates")
+        void list(CommandSource source) {
+        }
+
+        @Command(value = "give", permission = "crates.give", description = "Give a crate")
+        void give(CommandSource source) {
+        }
+
+        @Command("help")
+        void help(CommandSource source) {
+        }
+    }
+
+    @Permission(def = PermissionDefault.NOBODY)
+    static final class ClassWidePermission {
+        @Command(value = "secret", permission = "crates.secret")
+        void secret(CommandSource source) {
+        }
+    }
+
+    static final class PermissionWithoutNode {
+        @Command("x")
+        @Permission(def = PermissionDefault.EVERYONE)
+        void x() {
         }
     }
 
@@ -364,5 +437,110 @@ class CommandSystemTest {
                 .findFirst().orElseThrow();
         assertEquals("/crate give <player> [amount] [rarity]", give.usage());
         assertEquals(2, give.permissionLevel(), "a permission node implies operator level on Forge-likes");
+    }
+
+    // ------------------------------------------------------------------ asynchronous executors
+
+    private static TextCommandDispatcher dispatcher(Object handler, Executor mainThread) {
+        TextCommandDispatcher dispatcher = new TextCommandDispatcher(mainThread);
+        dispatcher.addAll(CommandScanner.scan("test", handler));
+        return dispatcher;
+    }
+
+    @Test
+    void aFutureThatSucceedsSaysNothingMore() {
+        JobCommands jobs = new JobCommands();
+        MainThread main = new MainThread();
+        FakeSource source = new FakeSource(null);
+
+        assertTrue(dispatcher(jobs, main).execute(source, "job", args("run")), "it counts as started");
+        jobs.pending.complete(null);
+        main.drain();
+
+        assertTrue(source.messages.isEmpty());
+    }
+
+    @Test
+    void aCommandExceptionInsideTheFutureReachesTheSenderOnTheMainThread() {
+        JobCommands jobs = new JobCommands();
+        MainThread main = new MainThread();
+        FakeSource source = new FakeSource(null);
+        dispatcher(jobs, main).execute(source, "job", args("run"));
+
+        // Thrown inside a later stage, the way a mod's thenAccept would: wrapped in a CompletionException.
+        jobs.pending.completeExceptionally(new java.util.concurrent.CompletionException(
+                new CommandException("Nothing to go back to.")));
+        assertTrue(source.messages.isEmpty(), "not before the main thread runs it");
+
+        main.drain();
+        assertEquals(List.of("Nothing to go back to."), source.messages);
+    }
+
+    @Test
+    void aBugInsideTheFutureIsLoggedAndTheSenderGetsTheGenericMessage() {
+        JobCommands jobs = new JobCommands();
+        MainThread main = new MainThread();
+        FakeSource source = new FakeSource(null);
+        dispatcher(jobs, main).execute(source, "job", args("run"));
+
+        jobs.pending.completeExceptionally(new IllegalStateException("database closed"));
+        main.drain();
+
+        assertEquals(List.of(CommandDefinition.INTERNAL_ERROR), source.messages);
+    }
+
+    @Test
+    void aSenderWhoLeftIsNotToldAnything() {
+        JobCommands jobs = new JobCommands();
+        MainThread main = new MainThread();
+        FakeSource source = new FakeSource(new FakePlayer());
+        dispatcher(jobs, main).execute(source, "job", args("run"));
+
+        source.available = false;
+        jobs.pending.completeExceptionally(new CommandException("Too late."));
+        main.drain();
+
+        assertTrue(source.messages.isEmpty());
+    }
+
+    @Test
+    void anAlreadyCompletedFutureAndNonFutureResultsAreFine() {
+        FakeSource source = new FakeSource(null);
+        assertTrue(dispatcher(new JobCommands(), new MainThread()).execute(source, "job", args("done")));
+        assertTrue(source.messages.isEmpty());
+    }
+
+    // ------------------------------------------------------------------ permission defaults
+
+    private static CommandDefinition definition(Object handler, String root) {
+        return CommandScanner.scan("test", handler).stream()
+                .filter(definition -> definition.root().equals(root))
+                .findFirst().orElseThrow();
+    }
+
+    @Test
+    void permissionOnTheMethodSetsTheNodeDefaultAndDescription() {
+        CommandDefinition list = definition(new PermissionCommands(), "list");
+        assertEquals(PermissionDefault.EVERYONE, list.permissionDefault());
+        assertEquals("List crates", list.permissionDescription());
+    }
+
+    @Test
+    void withoutPermissionTheOpLevelDecidesAndTheCommandDescriptionIsUsed() {
+        CommandDefinition give = definition(new PermissionCommands(), "give");
+        assertEquals(PermissionDefault.OPERATORS, give.permissionDefault(), "a node implies op level 2");
+        assertEquals("Give a crate", give.permissionDescription());
+        assertEquals(PermissionDefault.EVERYONE, definition(new PermissionCommands(), "help").permissionDefault(),
+                "no node, level 0: everyone");
+    }
+
+    @Test
+    void permissionOnTheClassAppliesToItsMethods() {
+        assertEquals(PermissionDefault.NOBODY, definition(new ClassWidePermission(), "secret").permissionDefault());
+    }
+
+    @Test
+    void permissionWithoutANodeIsRefusedAtRegistration() {
+        assertRejected(new PermissionWithoutNode(), "has no permission");
     }
 }

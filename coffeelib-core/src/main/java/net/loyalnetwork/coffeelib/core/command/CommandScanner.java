@@ -7,6 +7,7 @@ import net.loyalnetwork.coffeelib.api.command.annotation.Default;
 import net.loyalnetwork.coffeelib.api.command.annotation.Greedy;
 import net.loyalnetwork.coffeelib.api.command.annotation.Suggest;
 import net.loyalnetwork.coffeelib.api.exception.CoffeeLibException;
+import net.loyalnetwork.coffeelib.api.permission.annotation.Permission;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -65,6 +66,12 @@ public final class CommandScanner {
             int level = command.permissionLevel() >= 0 ? command.permissionLevel()
                     : group != null && group.permissionLevel() >= 0 ? group.permissionLevel()
                     : permission.isEmpty() ? 0 : 2;
+            Permission node = method.isAnnotationPresent(Permission.class) ? method.getAnnotation(Permission.class)
+                    : type.getAnnotation(Permission.class);
+            if (node != null && permission.isEmpty()) {
+                throw new CoffeeLibException("@Permission on " + where + " sets the default of a node, but the "
+                        + "command has no permission: set @Command(permission = ...)");
+            }
 
             Parameter[] parameters = method.getParameters();
             Class<?> senderType = parameters.length > 0 && isSender(parameters[0].getType())
@@ -79,7 +86,7 @@ public final class CommandScanner {
                         throw new CoffeeLibException("@Command method " + where
                                 + " has an empty path and its class has no @Command prefix");
                     }
-                    definitions.add(new CommandDefinition(ownerId, path, permission, level,
+                    definitions.add(new CommandDefinition(ownerId, path, permission, level, node,
                             command.description(), handler, method, senderType, arguments));
                 }
             }

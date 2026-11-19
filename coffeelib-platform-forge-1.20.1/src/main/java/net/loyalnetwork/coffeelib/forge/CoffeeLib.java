@@ -7,6 +7,8 @@ import net.loyalnetwork.coffeelib.api.event.EventBus;
 import net.loyalnetwork.coffeelib.api.database.DatabaseManager;
 import net.loyalnetwork.coffeelib.api.economy.EconomyManager;
 import net.loyalnetwork.coffeelib.api.permission.PermissionManager;
+import net.loyalnetwork.coffeelib.api.scheduler.Scheduler;
+import net.loyalnetwork.coffeelib.core.scheduler.TickSchedulers;
 import net.loyalnetwork.coffeelib.core.economy.SharedEconomy;
 import net.loyalnetwork.coffeelib.database.DefaultDatabaseManager;
 import net.loyalnetwork.coffeelib.core.permission.DefaultPermissionManager;
@@ -219,6 +221,21 @@ public final class CoffeeLib {
     /** {@link EconomyManager} for {@code modId}. */
     public static EconomyManager economy(String modId) {
         return SharedEconomy.forOwner(modId);
+    }
+
+    /**
+     * Work on the server thread for the calling mod (call it from the mod
+     * constructor, or keep the result): now, after some ticks, or every so
+     * many, plus {@code main()} to bring a future's result back to the server
+     * thread. Tasks are cancelled when the server stops.
+     */
+    public static Scheduler scheduler() {
+        return scheduler(ModLoadingContext.get().getActiveNamespace());
+    }
+
+    /** {@link Scheduler} for {@code modId}: the same one every call. */
+    public static Scheduler scheduler(String modId) {
+        return TickSchedulers.forOwner(modId);
     }
 
     /** {@link PermissionManager} for {@code modId}. */

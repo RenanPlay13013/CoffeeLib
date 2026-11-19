@@ -7,6 +7,8 @@ import net.loyalnetwork.coffeelib.api.event.EventBus;
 import net.loyalnetwork.coffeelib.api.database.DatabaseManager;
 import net.loyalnetwork.coffeelib.api.economy.EconomyManager;
 import net.loyalnetwork.coffeelib.api.permission.PermissionManager;
+import net.loyalnetwork.coffeelib.api.scheduler.Scheduler;
+import net.loyalnetwork.coffeelib.paper.scheduler.PaperScheduler;
 import net.loyalnetwork.coffeelib.core.economy.SharedEconomy;
 import net.loyalnetwork.coffeelib.database.DefaultDatabaseManager;
 import net.loyalnetwork.coffeelib.paper.permission.PaperPermissionManager;
@@ -124,6 +126,16 @@ public final class CoffeeLib {
      */
     public static EconomyManager economy(JavaPlugin plugin) {
         return SharedEconomy.forOwner(plugin.getName());
+    }
+
+    /**
+     * Work on the main thread for {@code plugin}, through Bukkit's scheduler:
+     * now, after some ticks, or every so many, plus {@code main()} to bring a
+     * future's result back to the main thread. Bukkit cancels the tasks when
+     * the plugin is disabled.
+     */
+    public static Scheduler scheduler(JavaPlugin plugin) {
+        return new PaperScheduler(plugin);
     }
 
     /**

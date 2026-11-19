@@ -68,12 +68,12 @@ public final class PaperPermissionManager extends DefaultPermissionManager {
     }
 
     /**
-     * Declares a command's node with the default its op level implies, unless
+     * Declares a command's node with {@code def} - its {@code @Permission}
+     * default, or the one its op level implies - unless
      * it was already declared - by its owner, deliberately, or by another
      * command sharing it.
      */
-    public static void declareCommandNode(JavaPlugin owner, String node, int permissionLevel, String description) {
-        PermissionDefault def = SharedPermissions.defaultForLevel(permissionLevel);
+    public static void declareCommandNode(JavaPlugin owner, String node, PermissionDefault def, String description) {
         SharedPermissions.nodes().declareIfAbsent(owner.getName(), node, def, description);
         PluginManager manager = owner.getServer().getPluginManager();
         if (manager.getPermission(node) == null) {

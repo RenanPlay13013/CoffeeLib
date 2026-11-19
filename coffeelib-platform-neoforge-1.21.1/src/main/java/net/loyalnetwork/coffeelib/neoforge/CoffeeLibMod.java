@@ -4,6 +4,9 @@ import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.GameShuttingDownEvent;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
+import net.neoforged.neoforge.event.server.ServerStoppedEvent;
+import net.neoforged.neoforge.event.tick.ServerTickEvent;
+import net.neoforged.neoforge.server.ServerLifecycleHooks;
 
 /**
  * Makes NeoForge's loader accept this jar as a mod, and registers the one
@@ -32,6 +35,15 @@ public final class CoffeeLibMod {
         // on the database server rather than left for it to time out.
         NeoForge.EVENT_BUS.addListener(GameShuttingDownEvent.class,
                 event -> net.loyalnetwork.coffeelib.database.OpenDatabases.closeAll());
+        // Every mod's scheduler: driven by the server's ticks, emptied when it stops.
+        net.loyalnetwork.coffeelib.core.scheduler.TickSchedulers.mainThread(() -> {
+            var server = ServerLifecycleHooks.getCurrentServer();
+            return server != null && server.isSameThread();
+        });
+        NeoForge.EVENT_BUS.addListener(ServerTickEvent.Post.class,
+                event -> net.loyalnetwork.coffeelib.core.scheduler.TickSchedulers.tickAll());
+        NeoForge.EVENT_BUS.addListener(ServerStoppedEvent.class,
+                event -> net.loyalnetwork.coffeelib.core.scheduler.TickSchedulers.stopAll());
     }
 
     private void onRegisterCommands(RegisterCommandsEvent event) {

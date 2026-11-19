@@ -14,14 +14,17 @@ import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.suggestion.SuggestionProvider;
 import net.loyalnetwork.coffeelib.api.command.exception.CommandException;
 import net.loyalnetwork.coffeelib.core.command.ArgumentKind;
+import net.loyalnetwork.coffeelib.core.command.AsyncCommands;
 import net.loyalnetwork.coffeelib.core.command.CommandDefinition;
 import net.loyalnetwork.coffeelib.core.command.ParameterDefinition;
+import net.loyalnetwork.coffeelib.core.scheduler.TickSchedulers;
 import net.loyalnetwork.coffeelib.forge.permission.ForgePermissions;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
 
 import java.util.List;
+import java.util.concurrent.CompletionStage;
 
 /**
  * Turns a {@link CommandDefinition} into a Brigadier tree.
@@ -131,9 +134,16 @@ public final class ForgeCommandCompiler {
             ParameterDefinition parameter = parameters.get(i);
             values[i] = context.getArgument(parameter.name(), valueClass(parameter.kind()));
         }
+        CommandSourceStack stack = context.getSource();
+        ForgeCommandContext source = new ForgeCommandContext(stack, definition.permissionLevel());
         try {
-            definition.executeParsed(new ForgeCommandContext(context.getSource(), definition.permissionLevel()),
-                    values);
+            CompletionStage<?> pending = definition.executeParsed(source, values);
+            if (pending != null) {
+                // Brigadier cannot wait: the command counts as started, and its reply comes later.
+                AsyncCommands.watch(definition, source, pending,
+                        TickSchedulers.forOwner(definition.ownerId()).main(),
+                        message -> stack.sendFailure(Component.literal(message)));
+            }
             return 1;
         } catch (CommandException e) {
             context.getSource().sendFailure(Component.literal(e.getMessage()));

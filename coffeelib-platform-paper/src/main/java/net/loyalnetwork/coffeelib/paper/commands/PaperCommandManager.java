@@ -6,6 +6,7 @@ import net.loyalnetwork.coffeelib.core.command.CommandDefinition;
 import net.loyalnetwork.coffeelib.core.command.CommandScanner;
 import net.loyalnetwork.coffeelib.core.command.TextCommandDispatcher;
 import net.loyalnetwork.coffeelib.paper.permission.PaperPermissionManager;
+import net.loyalnetwork.coffeelib.paper.scheduler.PaperScheduler;
 import org.bukkit.Server;
 import org.bukkit.command.CommandMap;
 import org.bukkit.entity.Player;
@@ -30,11 +31,13 @@ import java.util.Set;
 public final class PaperCommandManager implements CommandManager {
 
     private final JavaPlugin plugin;
-    private final TextCommandDispatcher dispatcher = new TextCommandDispatcher();
+    private final TextCommandDispatcher dispatcher;
     private final Set<String> registeredRoots = new HashSet<>();
 
     public PaperCommandManager(JavaPlugin plugin) {
         this.plugin = plugin;
+        // An asynchronous command's late reply is sent from the main thread.
+        this.dispatcher = new TextCommandDispatcher(new PaperScheduler(plugin).main());
     }
 
     @Override
@@ -42,11 +45,12 @@ public final class PaperCommandManager implements CommandManager {
         List<CommandDefinition> definitions = CommandScanner.scan(plugin.getName(), handler);
         dispatcher.addAll(definitions);
 
-        // Known to Bukkit - and so to LuckPerms' editor - with the default the op level implies.
+        // Known to Bukkit - and so to LuckPerms' editor - with its @Permission default or the one
+        // the op level implies.
         for (CommandDefinition definition : definitions) {
             if (!definition.permission().isEmpty()) {
                 PaperPermissionManager.declareCommandNode(plugin, definition.permission(),
-                        definition.permissionLevel(), definition.description());
+                        definition.permissionDefault(), definition.permissionDescription());
             }
         }
 

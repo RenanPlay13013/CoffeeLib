@@ -38,6 +38,9 @@ compartilhado entre donos na mesma JVM.
 - **Event bus próprio** — um canal compartilhado por todos os mods e plugins da
   lib, com prioridades, cancelamento e handlers `@Subscribe`, para dois donos
   conversarem por tipos Java simples em vez de eventos do Forge ou do Bukkit.
+- **Um scheduler** — roda trabalho na thread principal agora, depois de alguns
+  ticks ou a cada tantos, e traz o resultado de um future de volta para ela;
+  cancelado junto com o servidor. O Forge e o NeoForge não têm um próprio.
 - **Um canal de economia** — mods e plugins provêm moedas (`coins`, `cash`) e
   outros as usam pelo id, como o Vault, mas em todas as plataformas e com
   quantas moedas forem; com ponte para o Vault nos dois sentidos no Paper.
@@ -402,6 +405,38 @@ Regras:
 
 ---
 
+## Scheduler
+
+Trabalho na thread principal do servidor — agora, depois, ou de tempos em
+tempos — do mesmo jeito em todas as plataformas. O Forge e o NeoForge não têm um
+scheduler próprio; no Paper, este é o do Bukkit, ligado ao seu plugin.
+
+```java
+Scheduler scheduler = CoffeeLib.scheduler(container);   // Forge: scheduler(), Paper: scheduler(this)
+
+scheduler.later(20, () -> player.sendSystemMessage(...));    // daqui a um segundo
+Task autosave = scheduler.every(0, 20 * 60, this::saveAll); // a cada minuto, a partir do próximo tick
+autosave.cancel();
+
+scheduler.onMain(() -> world.setBlock(...));                 // já, se estiver na thread principal; senão, no próximo tick
+
+repository.findById(id)                                      // completa numa thread do banco...
+        .thenAcceptAsync(found -> teleport(player, found), scheduler.main());   // ...e continua na principal
+CompletableFuture<Optional<Home>> home = scheduler.onMain(repository.findById(id)); // o mesmo, como future
+```
+
+* **Ticks**, 20 por segundo quando o servidor acompanha. `later(0)` e `later(1)`
+  rodam os dois no próximo tick, como no Bukkit; o período do `every` conta a
+  partir de cada execução, então um tick lento empurra as seguintes em vez de
+  amontoá-las.
+* **Falhas** numa tarefa vão para o log com o id do seu mod ou plugin e não
+  param nem as outras tarefas nem a próxima execução de uma repetida.
+* **Canceladas para você** quando o servidor para (Forge, NeoForge) ou o plugin
+  é desabilitado (Paper). O que é agendado sem servidor rodando — no construtor
+  do mod, ou entre dois mundos de um cliente — espera o primeiro tick do próximo.
+
+---
+
 ## Event bus
 
 O CoffeeLib tem o próprio event bus, para conversar **entre** mods e plugins
@@ -590,6 +625,28 @@ CoffeeLib.commands(this).register(new CrateCommands());        // Paper, sem ent
   informados ao sender, com a linha de uso. Lance `CommandException` do executor
   para mensagens próprias; qualquer outra exceção é bug — vai para o log, e o
   sender só fica sabendo que algo deu errado.
+* **Executores assíncronos:** um executor pode devolver um `CompletableFuture`
+  (qualquer `CompletionStage`). O comando conta como iniciado na hora, e quando
+  o future falha o sender é avisado do mesmo jeito que acima — a mensagem da
+  `CommandException`, ou a genérica com a causa no log — a partir da thread
+  principal, e só se ainda estiver online. Lançada dentro de uma etapa seguinte,
+  ela chega embrulhada numa `CompletionException`; o CoffeeLib a desembrulha.
+  As etapas em si rodam onde o future delas completa (uma thread do banco, por
+  exemplo), então continue na thread principal com o scheduler antes de mexer
+  no mundo:
+
+  ```java
+  @Command(value = "back", permission = "crates.back")
+  CompletableFuture<Void> back(ServerPlayer player) {
+      return scheduler.onMain(homes.findById(player.getStringUUID())).thenAccept(found -> {
+          Home home = found.orElseThrow(() -> new CommandException("Nenhuma home para voltar."));
+          home.teleport(player);                                 // thread principal: seguro
+      });
+  }
+  ```
+
+  O Brigadier não espera futures, então o `/execute store result` registra `1`
+  ("iniciado") para um comando assim.
 * **Namespace:** no Paper o comando fica no namespace **do seu plugin**
   (`/seuplugin:crate`) e é atribuído ao seu plugin no `/help`, não ao CoffeeLib.
   Comandos Brigadier não têm namespace no Forge/NeoForge — os do vanilla também
@@ -708,6 +765,18 @@ Onde o CoffeeLib passou a checar nós:
   de um comando agora passa pela cadeia acima, com o nível dele como o que
   "operadores" significa. O nó é declarado automaticamente no `register`, com o
   default que o nível implica, a menos que você tenha declarado.
+* **O default do próprio comando:** coloque `@Permission` no método do
+  `@Command` (ou na classe dele) para declarar o nó com outro default ou outra
+  descrição, sem precisar de uma classe de constantes:
+
+  ```java
+  @Command(value = "list", permission = "crates.list")
+  @Permission(def = PermissionDefault.EVERYONE, description = "Listar as crates")
+  void list(CommandSource source) { ... }
+  ```
+
+  A primeira declaração de um nó vale, então uma feita com
+  `permissions.declare(...)` antes de registrar o comando mantém a dela.
 * **Os subcomandos do próprio `/coffeelib`** têm nós em vez de op nível 2 fixo:
   `coffeelib.config.list`, `coffeelib.config.reload`,
   `coffeelib.config.hotreload` e `coffeelib.placeholder`, todos com default de
@@ -973,6 +1042,19 @@ public class PlayerRepository extends HibernateRepository<PlayerEntity, String> 
 | `deleteById(id)` | `Boolean` | Se havia algo para apagar. |
 | `delete(entity)` | `Void` | Funciona com entidades *detached*, como as que um repositório devolve. |
 | `deleteAll()` | `Integer` | Um `delete` em massa: callbacks e cascatas do JPA **não** rodam. |
+| `update(id, change)` | `Boolean` | Busca, muda e grava numa transação, com a linha travada; se havia uma. Não precisa de `save`. |
+| `upsert(id, create, change)` | `T` | O `update`, criando a entidade com `create` antes quando não existe. |
+
+O `update` e o `upsert` travam a linha (`PESSIMISTIC_WRITE`), então dois deles no
+mesmo id rodam um depois do outro, em vez de um sobrescrever a mudança do outro.
+As funções deles rodam **na thread do banco**: leia do mundo ou do jogador o que
+elas precisam antes da chamada. Dois *primeiros* `upsert` de um id que ainda não
+tem linha disputam a inserção — um ganha e o outro falha com a chave duplicada,
+nunca em silêncio.
+
+```java
+players.upsert(uuid, () -> new PlayerEntity(uuid), player -> player.onLogin(name, ip, now));
+```
 
 O construtor confere se a classe é uma entidade daquele `SessionFactory`, então
 esquecê-la no `CoffeeHibernate.sessionFactory(db, ...)` falha ali mesmo, e não na
@@ -986,12 +1068,13 @@ Quatro coisas para ter em mente:
    `LazyInitializationException`. Busque o que precisa dentro do `read(...)`,
    com uma consulta `join fetch`.
 2. **Os futures completam numa thread do banco**, não na do servidor. Volte para
-   ela antes de mexer no mundo: `server.execute(...)` no Forge e no NeoForge, o
-   scheduler do Bukkit no Paper.
+   ela antes de mexer no mundo, com o [scheduler](#scheduler):
+   `scheduler.onMain(future)` ou `thenAcceptAsync(..., scheduler.main())`.
 3. **O `save` usa `merge`.** O objeto que você passa não fica gerenciado; guarde
    o devolvido. (Para quem vem do Spring: aqui ele nunca é o mesmo objeto.)
-4. **Uma chamada é uma transação.** `findById` seguido de `save` são duas; coloque
-   as duas dentro de um `write(...)` quando precisarem acontecer juntas.
+4. **Uma chamada é uma transação.** `findById` seguido de `save` são duas; use
+   `update`/`upsert`, ou coloque as duas dentro de um `write(...)`, quando
+   precisarem acontecer juntas.
 
 **Não existem consultas derivadas do nome do método**: um `findByName` nunca é
 gerado para você. Escreva-o com `read(...)`, como acima.

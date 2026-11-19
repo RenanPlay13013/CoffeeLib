@@ -35,6 +35,9 @@ shared between owners in the same JVM.
 - **An event bus of its own** — one channel shared by every mod and plugin on
   the library, with priorities, cancellation and `@Subscribe` handlers, so two
   owners talk through plain Java types instead of Forge or Bukkit events.
+- **A scheduler** — run work on the main thread now, after some ticks or
+  every so many, and bring a future's result back to it; cancelled with the
+  server. Forge and NeoForge have none of their own.
 - **An economy channel** — mods and plugins provide currencies (`coins`,
   `cash`) and others use them by id, like Vault but for every platform and any
   number of currencies; bridged to Vault both ways on Paper.
@@ -397,6 +400,38 @@ Rules:
 
 ---
 
+## Scheduler
+
+Work on the server's main thread — now, later, or every so often — the same way
+on every platform. Forge and NeoForge have no scheduler of their own; on Paper
+this is Bukkit's, bound to your plugin.
+
+```java
+Scheduler scheduler = CoffeeLib.scheduler(container);   // Forge: scheduler(), Paper: scheduler(this)
+
+scheduler.later(20, () -> player.sendSystemMessage(...));    // in one second
+Task autosave = scheduler.every(0, 20 * 60, this::saveAll); // every minute, starting next tick
+autosave.cancel();
+
+scheduler.onMain(() -> world.setBlock(...));                 // now if on the main thread, else next tick
+
+repository.findById(id)                                      // completes on a database thread...
+        .thenAcceptAsync(found -> teleport(player, found), scheduler.main());   // ...continues on the main one
+CompletableFuture<Optional<Home>> home = scheduler.onMain(repository.findById(id)); // same, as a future
+```
+
+* **Ticks**, 20 a second when the server keeps up. `later(0)` and `later(1)`
+  both run on the next tick, as on Bukkit; the period of `every` counts from
+  each run, so a slow tick shifts the following runs instead of bunching them.
+* **Failures** in a task are logged under your mod or plugin id and stop
+  neither the other tasks nor the next run of a repeating one.
+* **Cancelled for you** when the server stops (Forge, NeoForge) or the plugin is
+  disabled (Paper). Work scheduled while no server runs — from a mod
+  constructor, or between two worlds of a client — waits for the next server's
+  first tick.
+
+---
+
 ## Event bus
 
 CoffeeLib has its own event bus, for talking **between** mods and plugins
@@ -580,6 +615,28 @@ CoffeeLib.commands(this).register(new CrateCommands());        // Paper, no plug
   to the sender, with the usage line. Throw `CommandException` from an executor
   for your own messages; any other exception is a bug — logged, and the sender
   only learns that something went wrong.
+* **Asynchronous executors:** an executor may return a `CompletableFuture`
+  (any `CompletionStage`). The command counts as started right away, and when
+  the future fails the sender is told the same way as above — a
+  `CommandException`'s message, or the generic one with the cause logged — from
+  the main thread, and only if they are still online. Thrown inside a later
+  stage it arrives wrapped in a `CompletionException`; CoffeeLib unwraps it.
+  The stages themselves run wherever their future completes (a database
+  thread, say), so continue on the main thread with the scheduler before
+  touching the world:
+
+  ```java
+  @Command(value = "back", permission = "crates.back")
+  CompletableFuture<Void> back(ServerPlayer player) {
+      return scheduler.onMain(homes.findById(player.getStringUUID())).thenAccept(found -> {
+          Home home = found.orElseThrow(() -> new CommandException("No home to go back to."));
+          home.teleport(player);                                 // main thread: safe
+      });
+  }
+  ```
+
+  Brigadier cannot wait for a future, so `/execute store result` records `1`
+  ("started") for such a command.
 * **Namespace:** on Paper the command lives under **your plugin's** namespace
   (`/yourplugin:crate`) and is attributed to your plugin in `/help`, not to
   CoffeeLib. Brigadier commands have no namespace on Forge/NeoForge — vanilla's
@@ -695,6 +752,18 @@ Where CoffeeLib now checks nodes:
   `permission` now goes through the chain above, with its level as what
   "operators" means. The node is declared automatically on `register` with the
   default its level implies, unless you declared it yourself.
+* **A command's own default:** put `@Permission` on the `@Command` method (or
+  its class) to declare its node with another default or description, with no
+  constants class needed:
+
+  ```java
+  @Command(value = "list", permission = "crates.list")
+  @Permission(def = PermissionDefault.EVERYONE, description = "List the crates")
+  void list(CommandSource source) { ... }
+  ```
+
+  The first declaration of a node wins, so one made with
+  `permissions.declare(...)` before the command is registered keeps its own.
 * **`/coffeelib`'s own subcommands** have nodes instead of a flat op level 2:
   `coffeelib.config.list`, `coffeelib.config.reload`,
   `coffeelib.config.hotreload` and `coffeelib.placeholder`, all defaulting to
@@ -962,6 +1031,19 @@ public class PlayerRepository extends HibernateRepository<PlayerEntity, String> 
 | `deleteById(id)` | `Boolean` | Whether there was something to delete. |
 | `delete(entity)` | `Void` | Works with detached entities, such as the ones a repository returns. |
 | `deleteAll()` | `Integer` | One bulk `delete`: JPA callbacks and cascades do **not** run. |
+| `update(id, change)` | `Boolean` | Finds, changes and commits in one transaction, the row locked; whether there was one. No `save` needed. |
+| `upsert(id, create, change)` | `T` | `update`, creating the entity with `create` first when there is none. |
+
+`update` and `upsert` lock the row (`PESSIMISTIC_WRITE`), so two of them on the
+same id run one after the other instead of one overwriting the other's change.
+Their functions run **on the database thread**: read what they need from the
+world or the player before the call. Two *first* `upsert`s of an id that has no
+row yet race to insert it — one wins and the other fails with the duplicate key,
+never silently.
+
+```java
+players.upsert(uuid, () -> new PlayerEntity(uuid), player -> player.onLogin(name, ip, now));
+```
 
 The constructor checks that the class is an entity of that `SessionFactory`, so
 forgetting it in `CoffeeHibernate.sessionFactory(db, ...)` fails right there
@@ -975,12 +1057,13 @@ Four things to keep in mind:
    `LazyInitializationException`. Fetch what you need inside `read(...)`, with
    a `join fetch` query.
 2. **Futures complete on a database thread**, not the server's. Get back to it
-   before touching the world: `server.execute(...)` on Forge and NeoForge,
-   Bukkit's scheduler on Paper.
+   before touching the world, with the [scheduler](#scheduler):
+   `scheduler.onMain(future)` or `thenAcceptAsync(..., scheduler.main())`.
 3. **`save` merges.** The object you pass does not become managed; keep the
    returned one. (Spring users: here it is never the same object.)
-4. **One call is one transaction.** `findById` followed by `save` is two; put
-   both inside one `write(...)` when they must happen together.
+4. **One call is one transaction.** `findById` followed by `save` is two; use
+   `update`/`upsert`, or put both inside one `write(...)`, when they must happen
+   together.
 
 There are **no queries derived from method names**: a `findByName` is never
 generated for you. Write it with `read(...)`, as above.

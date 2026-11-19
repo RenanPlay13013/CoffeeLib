@@ -8,7 +8,9 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.TreeSet;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.Executor;
 
 /**
  * Runs and tab-completes commands from plain text: a label and the words
@@ -23,6 +25,17 @@ import java.util.concurrent.CopyOnWriteArrayList;
 public final class TextCommandDispatcher {
 
     private final List<CommandDefinition> definitions = new CopyOnWriteArrayList<>();
+    private final Executor mainThread;
+
+    /** A dispatcher whose asynchronous commands reply from the thread their future completes on. */
+    public TextCommandDispatcher() {
+        this(Runnable::run);
+    }
+
+    /** @param mainThread where an asynchronous command's late reply is sent from */
+    public TextCommandDispatcher(Executor mainThread) {
+        this.mainThread = mainThread;
+    }
 
     /** Adds definitions, refusing a path that is already taken. */
     public void addAll(List<CommandDefinition> added) {
@@ -63,7 +76,10 @@ public final class TextCommandDispatcher {
         }
 
         try {
-            match.execute(source, arguments);
+            CompletionStage<?> pending = match.execute(source, arguments);
+            if (pending != null) {
+                AsyncCommands.watch(match, source, pending, mainThread, source::sendMessage);
+            }
             return true;
         } catch (CommandException e) {
             source.sendMessage(e.getMessage());

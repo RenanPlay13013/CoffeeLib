@@ -215,4 +215,59 @@ class HibernateRepositoryTest {
 
         assertEquals("Database is closed", failure(owners.count()).getMessage());
     }
+
+    @ParameterizedTest
+    @EnumSource(value = DatabaseType.class, names = {"SQLITE", "H2"})
+    void updateChangesAnExistingRowAndReportsAMissingOne(DatabaseType type) {
+        open(type);
+        OwnerRepository owners = new OwnerRepository(sessions, db);
+        owners.save(new Owner("p1", "Steve")).join();
+
+        assertTrue(owners.update("p1", owner -> owner.name = "Alex").join());
+        assertFalse(owners.update("nobody", owner -> owner.name = "Alex").join(), "no row, nothing changed");
+        assertEquals("Alex", owners.findById("p1").join().orElseThrow().getName(), "written without a save");
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = DatabaseType.class, names = {"SQLITE", "H2"})
+    void upsertCreatesThenChangesWithoutDuplicating(DatabaseType type) {
+        open(type);
+        OwnerRepository owners = new OwnerRepository(sessions, db);
+
+        Owner created = owners.upsert("p1", () -> new Owner("p1", null), owner -> owner.name = "Steve").join();
+        Owner changed = owners.upsert("p1", () -> new Owner("p1", null), owner -> owner.name = "Alex").join();
+
+        assertEquals("Steve", created.getName(), "the change applies to a new entity too");
+        assertEquals("Alex", changed.getName());
+        assertEquals(1L, owners.count().join());
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = DatabaseType.class, names = {"SQLITE", "H2"})
+    void upsertRefusesWhatCreateGetsWrong(DatabaseType type) {
+        open(type);
+        OwnerRepository owners = new OwnerRepository(sessions, db);
+
+        assertTrue(failure(owners.upsert("p1", () -> new Owner("p2", "Steve"), owner -> { })).getMessage()
+                .contains("p2"), "another id is refused, naming it");
+        assertTrue(failure(owners.upsert("p1", () -> null, owner -> { })).getMessage().contains("null"));
+        assertEquals(0L, owners.count().join(), "nothing was written");
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = DatabaseType.class, names = {"SQLITE", "H2"})
+    void concurrentUpdatesOfOneRowDoNotOverwriteEachOther(DatabaseType type) {
+        open(type);
+        CrateRepository crates = new CrateRepository(sessions, db);
+        crates.save(new Crate("c", "")).join();
+
+        List<CompletableFuture<Boolean>> updates = new java.util.ArrayList<>();
+        for (int i = 0; i < 20; i++) {
+            updates.add(crates.update("c", crate -> crate.kind += "x"));
+        }
+        CompletableFuture.allOf(updates.toArray(CompletableFuture[]::new)).join();
+
+        assertEquals(20, crates.findById("c").join().orElseThrow().kind.length(),
+                "every append survived: the row is locked for each update");
+    }
 }

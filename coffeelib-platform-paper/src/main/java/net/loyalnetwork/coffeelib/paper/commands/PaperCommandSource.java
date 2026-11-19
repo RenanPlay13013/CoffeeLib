@@ -37,4 +37,10 @@ public final class PaperCommandSource implements CommandSource {
     public Object unwrap() {
         return sender;
     }
+
+    /** A player who left can no longer be told anything; the console and other senders can. */
+    @Override
+    public boolean isAvailable() {
+        return !(sender instanceof Player player) || player.isOnline();
+    }
 }

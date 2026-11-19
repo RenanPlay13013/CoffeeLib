@@ -2,10 +2,14 @@ package net.loyalnetwork.coffeelib.core.command;
 
 import net.loyalnetwork.coffeelib.api.command.CommandSource;
 import net.loyalnetwork.coffeelib.api.command.exception.CommandException;
+import net.loyalnetwork.coffeelib.api.permission.PermissionDefault;
+import net.loyalnetwork.coffeelib.api.permission.annotation.Permission;
+import net.loyalnetwork.coffeelib.core.permission.SharedPermissions;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.List;
+import java.util.concurrent.CompletionStage;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -29,6 +33,7 @@ public final class CommandDefinition {
     private final List<String> path;
     private final String permission;
     private final int permissionLevel;
+    private final Permission declaredNode;
     private final String description;
     private final Object handler;
     private final Method method;
@@ -36,17 +41,23 @@ public final class CommandDefinition {
     private final List<ParameterDefinition> parameters;
 
     CommandDefinition(String ownerId, List<String> path, String permission, int permissionLevel,
-                      String description, Object handler, Method method, Class<?> senderType,
-                      List<ParameterDefinition> parameters) {
+                      Permission declaredNode, String description, Object handler, Method method,
+                      Class<?> senderType, List<ParameterDefinition> parameters) {
         this.ownerId = ownerId;
         this.path = List.copyOf(path);
         this.permission = permission;
         this.permissionLevel = permissionLevel;
+        this.declaredNode = declaredNode;
         this.description = description;
         this.handler = handler;
         this.method = method;
         this.senderType = senderType;
         this.parameters = List.copyOf(parameters);
+    }
+
+    /** The mod or plugin the command belongs to. */
+    public String ownerId() {
+        return ownerId;
     }
 
     /** The literal words, lower case, root first. */
@@ -66,6 +77,24 @@ public final class CommandDefinition {
     /** The operator level Forge-like platforms require (already derived, never {@code -1}). */
     public int permissionLevel() {
         return permissionLevel;
+    }
+
+    /**
+     * The default to declare {@link #permission()} with: the method's or class's
+     * {@code @Permission(def = ...)}, or what the op level implies - everyone at
+     * level 0, operators above.
+     */
+    public PermissionDefault permissionDefault() {
+        if (declaredNode != null) {
+            return declaredNode.def();
+        }
+        return SharedPermissions.defaultForLevel(permissionLevel);
+    }
+
+    /** The description to declare {@link #permission()} with: {@code @Permission}'s, else the command's. */
+    public String permissionDescription() {
+        return declaredNode != null && !declaredNode.description().isEmpty() ? declaredNode.description()
+                : description;
     }
 
     public String description() {
@@ -102,9 +131,10 @@ public final class CommandDefinition {
      * argument (the platform has already joined a greedy one). Missing trailing
      * arguments are allowed down to {@link #requiredCount()}.
      *
+     * @return what an asynchronous executor returned, for {@link AsyncCommands#watch}; {@code null} otherwise
      * @throws CommandException for anything the sender should be told
      */
-    public void execute(CommandSource source, List<String> rawArguments) {
+    public CompletionStage<?> execute(CommandSource source, List<String> rawArguments) {
         if (rawArguments.size() < requiredCount() || rawArguments.size() > parameters.size()) {
             throw new CommandException("Usage: " + usage());
         }
@@ -112,7 +142,7 @@ public final class CommandDefinition {
         for (int i = 0; i < rawArguments.size(); i++) {
             values[i] = rawArguments.get(i);
         }
-        executeParsed(source, values);
+        return executeParsed(source, values);
     }
 
     /**
@@ -121,9 +151,10 @@ public final class CommandDefinition {
      * {@code null} for an optional one that was left out. Strings are parsed,
      * nulls get the default.
      *
+     * @return what an asynchronous executor returned, for {@link AsyncCommands#watch}; {@code null} otherwise
      * @throws CommandException for anything the sender should be told
      */
-    public void executeParsed(CommandSource source, Object[] values) {
+    public CompletionStage<?> executeParsed(CommandSource source, Object[] values) {
         if (!source.hasPermission(permission)) {
             throw new CommandException("You do not have permission to run this command.");
         }
@@ -153,7 +184,7 @@ public final class CommandDefinition {
             call[0] = sender;
             System.arraycopy(arguments, 0, call, 1, arguments.length);
         }
-        invoke(source, call);
+        return invoke(source, call);
     }
 
     /**
@@ -178,21 +209,28 @@ public final class CommandDefinition {
                 : "This command cannot be run from here.");
     }
 
-    private void invoke(CommandSource source, Object[] call) {
+    /** Calls the method; a returned future is handed back, anything else returned is ignored. */
+    private CompletionStage<?> invoke(CommandSource source, Object[] call) {
         try {
-            method.invoke(handler, call);
+            Object result = method.invoke(handler, call);
+            return result instanceof CompletionStage<?> pending ? pending : null;
         } catch (InvocationTargetException e) {
             Throwable cause = e.getCause();
             if (cause instanceof CommandException userError) {
                 throw userError;
             }
             // A bug in the executor: the sender learns that it failed, the log learns why.
-            LOGGER.log(Level.SEVERE, "[CoffeeLib/" + ownerId + "] Command '" + String.join(" ", path)
-                    + "' failed for " + source.name(), cause);
+            logFailure(source, cause);
             throw new CommandException(INTERNAL_ERROR);
         } catch (IllegalAccessException e) {
             LOGGER.log(Level.SEVERE, "[CoffeeLib/" + ownerId + "] Could not call " + method, e);
             throw new CommandException(INTERNAL_ERROR);
         }
+    }
+
+    /** Logs a bug in the executor, synchronous or in its future. */
+    void logFailure(CommandSource source, Throwable cause) {
+        LOGGER.log(Level.SEVERE, "[CoffeeLib/" + ownerId + "] Command '" + String.join(" ", path)
+                + "' failed for " + source.name(), cause);
     }
 }

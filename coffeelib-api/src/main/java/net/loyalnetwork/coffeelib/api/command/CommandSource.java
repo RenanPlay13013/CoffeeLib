@@ -31,4 +31,13 @@ public interface CommandSource {
 
     /** The platform's own source object - {@code CommandSourceStack} or {@code CommandSender}. */
     Object unwrap();
+
+    /**
+     * Whether the sender can still be told something: {@code false} once a
+     * player has left. The console always can. An asynchronous command's late
+     * reply is dropped when this is {@code false}.
+     */
+    default boolean isAvailable() {
+        return true;
+    }
 }

@@ -47,12 +47,13 @@ public final class NeoForgeCommandManager implements CommandManager {
         paths.addAll(definitions);
 
         // A command's node is known to the permission system - and so to LuckPerms' editor -
-        // with the default its op level implies, unless its owner declared it on purpose.
+        // with its @Permission default or the one its op level implies, unless its owner
+        // declared it on purpose first.
         for (CommandDefinition definition : definitions) {
             if (!definition.permission().isEmpty()) {
                 SharedPermissions.nodes().declareIfAbsent(ownerId, definition.permission(),
-                        SharedPermissions.defaultForLevel(definition.permissionLevel()),
-                        Math.max(definition.permissionLevel(), 0), definition.description());
+                        definition.permissionDefault(), Math.max(definition.permissionLevel(), 0),
+                        definition.permissionDescription());
             }
         }
 

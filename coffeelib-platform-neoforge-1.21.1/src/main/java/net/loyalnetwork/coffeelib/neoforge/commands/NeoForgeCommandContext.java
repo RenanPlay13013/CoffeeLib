@@ -4,6 +4,7 @@ import net.loyalnetwork.coffeelib.api.command.CommandSource;
 import net.loyalnetwork.coffeelib.neoforge.permission.NeoForgePermissions;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerPlayer;
 
 /**
  * A {@link CommandSource} over NeoForge's {@link CommandSourceStack}.
@@ -46,5 +47,12 @@ public final class NeoForgeCommandContext implements CommandSource {
     @Override
     public Object unwrap() {
         return stack;
+    }
+
+    /** A player who left can no longer be told anything; every other source can. */
+    @Override
+    public boolean isAvailable() {
+        ServerPlayer player = stack.getPlayer();
+        return player == null || !player.hasDisconnected();
     }
 }

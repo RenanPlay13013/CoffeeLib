@@ -1,5 +1,6 @@
 package net.loyalnetwork.coffeelib.database.hibernate;
 
+import jakarta.persistence.LockModeType;
 import jakarta.persistence.metamodel.EntityType;
 import net.loyalnetwork.coffeelib.api.database.Database;
 import net.loyalnetwork.coffeelib.api.database.DatabaseException;
@@ -13,7 +14,9 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * The usual CRUD for one entity type, on a Hibernate {@link SessionFactory}
@@ -37,9 +40,9 @@ import java.util.function.Function;
  * <ul>
  *   <li>Every method runs on {@link Database#executor()} and returns a future,
  *       which <b>completes on a database thread</b>, not the server's: get back
- *       to the server thread with the platform's scheduler before touching the
- *       world ({@code server.execute(...)} on Forge/NeoForge, Bukkit's
- *       scheduler on Paper).</li>
+ *       to the server thread with CoffeeLib's {@code Scheduler} before touching
+ *       the world ({@code scheduler.onMain(future)}, or
+ *       {@code thenAcceptAsync(..., scheduler.main())}).</li>
  *   <li><b>Returned entities are detached</b>: their session is closed by the
  *       time the future completes, so reading a {@code LAZY} association then
  *       throws {@code LazyInitializationException}. Fetch what you need inside
@@ -47,7 +50,8 @@ import java.util.function.Function;
  *   <li><b>{@link #save} merges</b>: the object passed in does not become
  *       managed - use the one returned, which also carries a generated id.</li>
  *   <li><b>One call is one transaction.</b> {@code findById} then {@code save}
- *       are two; put both in one {@link #write} to make them atomic.</li>
+ *       are two; {@link #update} and {@link #upsert} read and change in one,
+ *       and {@link #write} does it for anything else.</li>
  *   <li>There are no queries derived from method names ({@code findByName}
  *       written for you): write them with {@link #read}.</li>
  * </ul>
@@ -172,6 +176,68 @@ public abstract class HibernateRepository<T, ID> {
         return write(session -> session.createMutationQuery("delete from " + entityName).executeUpdate());
     }
 
+    /**
+     * Changes the entity with {@code id}, if there is one, in one transaction;
+     * the future says whether there was.
+     * <p>
+     * {@code change} gets the managed entity: what it sets is written on
+     * commit, with no {@code save} needed. The row is locked for the
+     * transaction ({@code PESSIMISTIC_WRITE}), so concurrent updates of the same
+     * id run one after the other instead of overwriting each other. SQLite has
+     * no row locks, but its single connection serializes writes anyway.
+     * <p>
+     * {@code change} runs on the database's threads, so it must not touch the
+     * world or a player - read what it needs before the call.
+     */
+    public CompletableFuture<Boolean> update(ID id, Consumer<? super T> change) {
+        Objects.requireNonNull(id, "id");
+        Objects.requireNonNull(change, "change");
+        return write(session -> {
+            T entity = session.find(type, id, LockModeType.PESSIMISTIC_WRITE);
+            if (entity == null) {
+                return false;
+            }
+            change.accept(entity);
+            return true;
+        });
+    }
+
+    /**
+     * The entity with {@code id}, created with {@code create} when there is
+     * none, then changed by {@code change} - all in one transaction, with the
+     * row locked as in {@link #update}. The future holds the entity as committed.
+     * <p>
+     * Two first calls for an id with no row yet race to insert it: one wins,
+     * the other fails with the duplicate key - it is never lost silently. Retry
+     * it if that can happen, such as two servers writing to one database.
+     * <p>
+     * Both functions run on the database's threads, like {@link #update}'s.
+     * The future fails with a {@link DatabaseException} when {@code create}
+     * returns {@code null} or an entity with another id.
+     */
+    public CompletableFuture<T> upsert(ID id, Supplier<? extends T> create, Consumer<? super T> change) {
+        Objects.requireNonNull(id, "id");
+        Objects.requireNonNull(create, "create");
+        Objects.requireNonNull(change, "change");
+        return write(session -> {
+            T entity = session.find(type, id, LockModeType.PESSIMISTIC_WRITE);
+            if (entity == null) {
+                entity = create.get();
+                if (entity == null) {
+                    throw new IllegalArgumentException("upsert(" + id + "): create returned null");
+                }
+                Object created = sessions.getPersistenceUnitUtil().getIdentifier(entity);
+                if (!id.equals(created)) {
+                    throw new IllegalArgumentException("upsert(" + id + "): create returned an entity with id "
+                            + created);
+                }
+                session.persist(entity);
+            }
+            change.accept(entity);
+            return entity;
+        });
+    }
+
     /** Runs {@code work} on a session without a transaction, on the database's threads. */
     protected <R> CompletableFuture<R> read(Function<Session, R> work) {
         return run(() -> sessions.fromSession(work::apply));
@@ -195,7 +261,7 @@ public abstract class HibernateRepository<T, ID> {
         return sessions;
     }
 
-    private <R> CompletableFuture<R> run(java.util.function.Supplier<R> work) {
+    private <R> CompletableFuture<R> run(Supplier<R> work) {
         if (database.isClosed()) {
             return CompletableFuture.failedFuture(new DatabaseException("Database is closed"));
         }
