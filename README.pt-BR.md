@@ -38,6 +38,9 @@ compartilhado entre donos na mesma JVM.
 - **Event bus próprio** — um canal compartilhado por todos os mods e plugins da
   lib, com prioridades, cancelamento e handlers `@Subscribe`, para dois donos
   conversarem por tipos Java simples em vez de eventos do Forge ou do Bukkit.
+- **Um canal de economia** — mods e plugins provêm moedas (`coins`, `cash`) e
+  outros as usam pelo id, como o Vault, mas em todas as plataformas e com
+  quantas moedas forem; com ponte para o Vault nos dois sentidos no Paper.
 - **MySQL, MariaDB, PostgreSQL, SQLite e H2** — uma conexão em pool
   (HikariCP) por mod ou plugin, num servidor ou num arquivo local, configurada por um `database.yml`, com helpers JDBC assíncronos e um
   `DataSource` comum, com o Hibernate pronto para usar por cima.
@@ -96,15 +99,15 @@ repositories {
 
 dependencies {
     // Paper
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-paper:3.8")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-paper:3.9")
     // Forge 1.20.1
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-forge-1.20.1:3.8")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-forge-1.20.1:3.9")
     // NeoForge 1.21.1
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-neoforge-1.21.1:3.8")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-neoforge-1.21.1:3.9")
     // Ou apenas o core agnóstico de formato (config + DI, sem backend de plataforma)
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-core:3.8")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-core:3.9")
     // Ou só as interfaces e anotações
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-api:3.8")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-api:3.9")
 }
 ```
 
@@ -709,6 +712,85 @@ Onde o CoffeeLib passou a checar nós:
   `coffeelib.config.list`, `coffeelib.config.reload`,
   `coffeelib.config.hotreload` e `coffeelib.placeholder`, todos com default de
   operador — então um servidor pode dar reload de config à staff sem dar op.
+
+---
+
+## Economia
+
+Um canal entre os mods que **provêm** moedas e os mods que as **usam**, no
+espírito do Vault: um mod de essentials provê `coins` e `cash`, um mod de loja
+cobra `coins`, um mod de missões paga `cash`, e nenhum deles conhece os outros.
+A CoffeeLib **não guarda saldo nenhum**: o mod provedor mantém as contas, onde
+quiser, e responde a cada chamada.
+
+Provendo uma moeda:
+
+```java
+public final class CoinsProvider implements CurrencyProvider {
+    @Override public String id() { return "coins"; }
+    @Override public int fractionalDigits() { return 0; }           // moedas inteiras
+    @Override public String format(BigDecimal amount) { return amount.toPlainString() + " coins"; }
+
+    @Override public CompletableFuture<BigDecimal> balance(UUID player) { ... }
+    @Override public CompletableFuture<TransactionResult> deposit(UUID player, BigDecimal amount) { ... }
+    @Override public CompletableFuture<TransactionResult> withdraw(UUID player, BigDecimal amount) { ... }
+    // opcionais: hasAccount, set, displayName
+}
+
+CoffeeLib.economy(container).register(new CoinsProvider(...));   // Forge: economy(), Paper: economy(this)
+```
+
+Usando uma:
+
+```java
+Currency coins = CoffeeLib.economy(container).currency("coins");   // pode pegar na subida
+
+coins.withdraw(player.getUUID(), new BigDecimal("50")).thenAccept(result -> server.execute(() -> {
+    if (result.succeeded()) { /* entrega o item */ }
+    else if (result.status() == TransactionResult.Status.INSUFFICIENT_FUNDS) { /* "coins insuficientes" */ }
+}));
+coins.transfer(pagador, recebedor, valor);                           // /pay
+```
+
+* **O handle funciona antes do provedor existir.** Os mods carregam em qualquer
+  ordem, então `currency("coins")` sempre devolve um handle; até um mod prover a
+  moeda, `isAvailable()` é falso e as transações respondem `NO_PROVIDER`.
+  `onAvailable("coins", currency -> ...)` roda quando ela chega (ou na hora).
+* **Um provedor por moeda.** Um segundo mod registrando `coins` é recusado com
+  uma exceção que diz quem já provê.
+* **Os valores são conferidos antes de chegar ao provedor**: negativo, zero ou
+  com mais casas decimais do que a moeda aceita voltam como `INVALID_AMOUNT`.
+  Use `BigDecimal`, nunca `double`, para dinheiro.
+* **Tudo é assíncrono**: um provedor com banco de dados nunca trava o servidor,
+  e um em memória completa na hora. Os futures completam na thread do provedor;
+  volte para a thread do servidor antes de mexer no mundo.
+* **`transfer` é um saque seguido de um depósito**; se o depósito falhar, o
+  valor é devolvido. O provedor vê duas operações, não uma atômica.
+* Um provedor é um objeto comum chamado de qualquer thread: ele precisa ser
+  thread-safe. No Paper, as moedas de um plugin saem quando ele é desabilitado.
+
+### Vault (Paper)
+
+Com o Vault instalado, a CoffeeLib liga as duas economias, conforme o
+`plugins/CoffeeLib/economy.yml` da CoffeeLib:
+
+```yaml
+# The CoffeeLib currency offered to Vault plugins as the server's economy, such as coins. Empty: none
+vaultExport: ''
+# The id another plugin's Vault economy (EssentialsX, CMI...) gets as a CoffeeLib currency. Empty: do not bring it in
+vaultImport: vault
+```
+
+* **Importação** (ligada por padrão): a economia do Vault de outro plugin vira a
+  moeda `vault` da CoffeeLib, então um mod ou plugin na CoffeeLib pode cobrar o
+  dinheiro do EssentialsX com `currency("vault")`. As chamadas rodam na thread
+  do servidor, como as economias do Vault esperam. O Vault não tem como definir
+  um saldo, então `set` responde `NOT_SUPPORTED`.
+* **Exportação** (desligada até você nomear uma moeda): a moeda da CoffeeLib
+  escolhida é registrada no Vault com prioridade alta, e todo plugin de Vault
+  passa a usá-la. A API do Vault é síncrona, então cada chamada espera até 5
+  segundos pelo provedor: de graça para um provedor em memória, a thread do
+  servidor travada para um lento. Bancos respondem `NOT_IMPLEMENTED`.
 
 ---
 

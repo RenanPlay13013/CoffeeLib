@@ -5,7 +5,9 @@ import net.loyalnetwork.coffeelib.api.config.ReloadableConfigManager;
 import net.loyalnetwork.coffeelib.api.command.CommandManager;
 import net.loyalnetwork.coffeelib.api.event.EventBus;
 import net.loyalnetwork.coffeelib.api.database.DatabaseManager;
+import net.loyalnetwork.coffeelib.api.economy.EconomyManager;
 import net.loyalnetwork.coffeelib.api.permission.PermissionManager;
+import net.loyalnetwork.coffeelib.core.economy.SharedEconomy;
 import net.loyalnetwork.coffeelib.database.DefaultDatabaseManager;
 import net.loyalnetwork.coffeelib.paper.permission.PaperPermissionManager;
 import net.loyalnetwork.coffeelib.api.placeholder.PlaceholderManager;
@@ -113,6 +115,15 @@ public final class CoffeeLib {
         return new DefaultDatabaseManager(plugin.getName(), () -> forPlugin(plugin, configDirectory),
                 plugin.getClass().getClassLoader(),
                 () -> configDirectory != null ? configDirectory : plugin.getDataFolder().toPath());
+    }
+
+    /**
+     * The economy channel for {@code plugin}: register the currencies it provides,
+     * and take handles to anyone's ({@code currency("coins")}). CoffeeLib holds
+     * no balances; the providing mod answers every call.
+     */
+    public static EconomyManager economy(JavaPlugin plugin) {
+        return SharedEconomy.forOwner(plugin.getName());
     }
 
     /**

@@ -35,6 +35,9 @@ shared between owners in the same JVM.
 - **An event bus of its own** — one channel shared by every mod and plugin on
   the library, with priorities, cancellation and `@Subscribe` handlers, so two
   owners talk through plain Java types instead of Forge or Bukkit events.
+- **An economy channel** — mods and plugins provide currencies (`coins`,
+  `cash`) and others use them by id, like Vault but for every platform and any
+  number of currencies; bridged to Vault both ways on Paper.
 - **MySQL, MariaDB, PostgreSQL, SQLite and H2** — a pooled connection
   (HikariCP) per mod or plugin, to a server or to a local file, configured from a `database.yml`, with async JDBC helpers and a
   plain `DataSource`, and Hibernate ready to use on top.
@@ -96,15 +99,15 @@ repositories {
 
 dependencies {
     // Paper
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-paper:3.8")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-paper:3.9")
     // Forge 1.20.1
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-forge-1.20.1:3.8")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-forge-1.20.1:3.9")
     // NeoForge 1.21.1
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-neoforge-1.21.1:3.8")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-neoforge-1.21.1:3.9")
     // Or just the format-agnostic core (config + DI, no platform backend)
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-core:3.8")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-core:3.9")
     // Or only the interfaces and annotations
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-api:3.8")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-api:3.9")
 }
 ```
 
@@ -696,6 +699,85 @@ Where CoffeeLib now checks nodes:
   `coffeelib.config.list`, `coffeelib.config.reload`,
   `coffeelib.config.hotreload` and `coffeelib.placeholder`, all defaulting to
   operators — so a server can hand config reloads to staff without giving them op.
+
+---
+
+## Economy
+
+A channel between the mods that **provide** currencies and the mods that
+**use** them, in the spirit of Vault: an essentials mod provides `coins` and
+`cash`, a shop mod charges `coins`, a quest mod pays `cash`, and none of them
+knows the others. CoffeeLib holds **no balances** - the providing mod keeps
+the accounts, wherever it likes, and answers every call.
+
+Providing a currency:
+
+```java
+public final class CoinsProvider implements CurrencyProvider {
+    @Override public String id() { return "coins"; }
+    @Override public int fractionalDigits() { return 0; }           // whole coins
+    @Override public String format(BigDecimal amount) { return amount.toPlainString() + " coins"; }
+
+    @Override public CompletableFuture<BigDecimal> balance(UUID player) { ... }
+    @Override public CompletableFuture<TransactionResult> deposit(UUID player, BigDecimal amount) { ... }
+    @Override public CompletableFuture<TransactionResult> withdraw(UUID player, BigDecimal amount) { ... }
+    // optional: hasAccount, set, displayName
+}
+
+CoffeeLib.economy(container).register(new CoinsProvider(...));   // Forge: economy(), Paper: economy(this)
+```
+
+Using one:
+
+```java
+Currency coins = CoffeeLib.economy(container).currency("coins");   // fine to take at startup
+
+coins.withdraw(player.getUUID(), new BigDecimal("50")).thenAccept(result -> server.execute(() -> {
+    if (result.succeeded()) { /* give the item */ }
+    else if (result.status() == TransactionResult.Status.INSUFFICIENT_FUNDS) { /* "not enough coins" */ }
+}));
+coins.transfer(payer, payee, amount);                                // /pay
+```
+
+* **A handle works before its provider exists.** Mods load in any order, so
+  `currency("coins")` always returns a handle; until a mod provides it,
+  `isAvailable()` is false and transactions report `NO_PROVIDER`.
+  `onAvailable("coins", currency -> ...)` runs when it arrives (or right away).
+* **One provider per currency.** A second mod registering `coins` is refused
+  with an exception naming the first.
+* **Amounts are checked before the provider sees them**: negative, zero, or with
+  more decimals than the currency allows come back as `INVALID_AMOUNT`. Use
+  `BigDecimal`, never `double`, for money.
+* **Everything is asynchronous**: a provider on a database never blocks the
+  server, and one in memory completes at once. Futures complete on the
+  provider's thread - go back to the server thread before touching the world.
+* **`transfer` is a withdrawal then a deposit**; if the deposit fails, the
+  amount is given back. The provider sees two operations, not one atomic one.
+* A provider is a plain object called from any thread: it must be thread-safe.
+  On Paper, a plugin's currencies are withdrawn when it is disabled.
+
+### Vault (Paper)
+
+With Vault installed, CoffeeLib joins the two economies, set in CoffeeLib's
+`plugins/CoffeeLib/economy.yml`:
+
+```yaml
+# The CoffeeLib currency offered to Vault plugins as the server's economy, such as coins. Empty: none
+vaultExport: ''
+# The id another plugin's Vault economy (EssentialsX, CMI...) gets as a CoffeeLib currency. Empty: do not bring it in
+vaultImport: vault
+```
+
+* **Import** (on by default): the Vault economy of another plugin becomes the
+  CoffeeLib currency `vault`, so a mod or plugin on CoffeeLib can charge
+  EssentialsX money with `currency("vault")`. Its calls run on the server
+  thread, as Vault economies expect. Vault cannot set a balance, so `set`
+  reports `NOT_SUPPORTED`.
+* **Export** (off until you name a currency): the chosen CoffeeLib currency is
+  registered with Vault at high priority, so every Vault plugin uses it. Vault's
+  API is synchronous, so each call waits up to 5 seconds for the provider - free
+  for a provider in memory, a blocked server thread for a slow one. Banks report
+  `NOT_IMPLEMENTED`.
 
 ---
 

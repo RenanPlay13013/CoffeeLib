@@ -4,7 +4,7 @@ main: net.loyalnetwork.coffeelib.paper.CoffeeLibPlugin
 description: Multiplatform configuration management library for Minecraft.
 author: LoyalNetwork
 # Loaded first when present, so the PlaceholderAPI bridge finds it at enable time.
-softdepend: [PlaceholderAPI]
+softdepend: [PlaceholderAPI, Vault]
 # Hibernate, downloaded by the server from Maven Central on first start (Spigot/Paper
 # 1.17+) and shared with plugins that depend on CoffeeLib, so they use it without
 # shading it. Not bundled: it is a large API a plugin calls directly, so it keeps its

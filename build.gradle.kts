@@ -12,7 +12,7 @@ val injectedVersion = providers.gradleProperty("version")
 
 allprojects {
     group = injectedGroup.getOrElse("net.loyalnetwork")
-    version = injectedVersion.getOrElse("3.8-SNAPSHOT")
+    version = injectedVersion.getOrElse("3.9-SNAPSHOT")
 }
 
 subprojects {

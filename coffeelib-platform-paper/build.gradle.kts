@@ -9,6 +9,9 @@ repositories {
     // PlaceholderAPI, for the optional bridge. compileOnly below: never bundled, only used
     // when the server has the PlaceholderAPI plugin installed.
     maven("https://repo.extendedclip.com/releases/")
+    // Vault's API, for the optional economy bridge. compileOnly below: only used when the
+    // server has the Vault plugin installed.
+    maven("https://jitpack.io")
 }
 
 tasks.jar {
@@ -69,6 +72,12 @@ dependencies {
     compileOnly("org.spigotmc:spigot-api:1.8.8-R0.1-SNAPSHOT")
     // CoffeeHibernate compiles against it; the server downloads it (plugin.yml libraries).
     compileOnly("org.hibernate.orm:hibernate-core:${project.property("hibernate_version")}")
+    compileOnly("com.github.MilkBowl:VaultAPI:1.7") {
+        isTransitive = false
+    }
+    testImplementation("com.github.MilkBowl:VaultAPI:1.7") {
+        isTransitive = false
+    }
     compileOnly("me.clip:placeholderapi:2.11.6") {
         isTransitive = false
     }

@@ -5,7 +5,9 @@ import net.loyalnetwork.coffeelib.api.config.ReloadableConfigManager;
 import net.loyalnetwork.coffeelib.api.command.CommandManager;
 import net.loyalnetwork.coffeelib.api.event.EventBus;
 import net.loyalnetwork.coffeelib.api.database.DatabaseManager;
+import net.loyalnetwork.coffeelib.api.economy.EconomyManager;
 import net.loyalnetwork.coffeelib.api.permission.PermissionManager;
+import net.loyalnetwork.coffeelib.core.economy.SharedEconomy;
 import net.loyalnetwork.coffeelib.database.DefaultDatabaseManager;
 import net.loyalnetwork.coffeelib.core.permission.DefaultPermissionManager;
 import net.loyalnetwork.coffeelib.neoforge.permission.NeoForgePermissions;
@@ -202,6 +204,20 @@ public final class CoffeeLib {
                 : FMLPaths.CONFIGDIR.get().resolve(modId);
         return new DefaultDatabaseManager(modId, () -> detached(modId, directory.get()),
                 CoffeeLib.class.getClassLoader(), directory);
+    }
+
+    /**
+     * The economy channel for {@code container's mod}: register the currencies it provides,
+     * and take handles to anyone's ({@code currency("coins")}). CoffeeLib holds
+     * no balances; the providing mod answers every call.
+     */
+    public static EconomyManager economy(ModContainer container) {
+        return economy(container.getModId());
+    }
+
+    /** {@link EconomyManager} for {@code modId}. */
+    public static EconomyManager economy(String modId) {
+        return SharedEconomy.forOwner(modId);
     }
 
     public static EventBus eventBus(ModContainer container) {

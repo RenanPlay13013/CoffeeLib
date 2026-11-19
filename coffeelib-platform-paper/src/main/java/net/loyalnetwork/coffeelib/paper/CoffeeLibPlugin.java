@@ -1,6 +1,7 @@
 package net.loyalnetwork.coffeelib.paper;
 
 import net.loyalnetwork.coffeelib.api.database.Database;
+import net.loyalnetwork.coffeelib.core.economy.SharedEconomy;
 import net.loyalnetwork.coffeelib.core.event.SharedEventBus;
 import net.loyalnetwork.coffeelib.database.OpenDatabases;
 import net.loyalnetwork.coffeelib.paper.placeholder.PaperPlaceholderManager;
@@ -29,6 +30,11 @@ public final class CoffeeLibPlugin extends JavaPlugin implements Listener {
     @Override
     public void onEnable() {
         getServer().getPluginManager().registerEvents(this, this);
+        // The economy bridge names Vault's classes, so it is only loaded when Vault is there.
+        if (getServer().getPluginManager().getPlugin("Vault") != null) {
+            net.loyalnetwork.coffeelib.paper.economy.VaultBridge.install(this,
+                    CoffeeLib.forPlugin(this).load(net.loyalnetwork.coffeelib.paper.economy.EconomyConfig.class));
+        }
     }
 
     /**
@@ -45,6 +51,9 @@ public final class CoffeeLibPlugin extends JavaPlugin implements Listener {
         // Same reasoning for placeholders: a resolver holds the plugin's objects, and a
         // published PlaceholderAPI expansion would keep answering for a plugin that is gone.
         PaperPlaceholderManager.cleanUp(event.getPlugin().getName());
+        // And its currencies: a provider answering for a disabled plugin would serve stale or
+        // unreachable balances, and keep the old classes alive.
+        SharedEconomy.cleanUp(event.getPlugin().getName());
 
         // Databases too, but not yet: Bukkit fires this event before the plugin's own
         // onDisable, which is exactly where a plugin saves its data. So they are taken now -
