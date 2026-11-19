@@ -177,6 +177,33 @@ class EconomyTest {
     }
 
     @Test
+    void aFailedRefundIsNotReportedAsAnOrdinaryRecipientError() {
+        MapProvider coins = new MapProvider("coins", 0);
+        essentials.register(coins);
+        Currency handle = shopMod.currency("coins");
+        handle.deposit(steve, new BigDecimal("100")).join();
+        // Refuse both the target deposit and the attempted refund after withdrawal.
+        // The recipient deposit and the refund both fail after the withdrawal.
+        CurrencyProvider failingRefund = new CurrencyProvider() {
+            public String id() { return "coins"; }
+            public int fractionalDigits() { return 0; }
+            public CompletableFuture<BigDecimal> balance(UUID id) { return coins.balance(id); }
+            public CompletableFuture<TransactionResult> withdraw(UUID id, BigDecimal amt) {
+                return coins.withdraw(id, amt);
+            }
+            public CompletableFuture<TransactionResult> deposit(UUID id, BigDecimal amt) {
+                return CompletableFuture.completedFuture(TransactionResult.failure(Status.FAILED, "storage offline"));
+            }
+        };
+        essentials.register(failingRefund); // same owner may replace its provider
+
+        TransactionResult result = handle.transfer(steve, alex, BigDecimal.TEN).join();
+        assertEquals(Status.FAILED, result.status());
+        assertTrue(result.message().contains("manual reconciliation"));
+        assertEquals(new BigDecimal("90"), coins.accounts.get(steve));
+    }
+
+    @Test
     void setIsTheProvidersChoice() {
         essentials.register(new MapProvider("coins", 0));
         assertEquals(Status.NOT_SUPPORTED, shopMod.currency("coins").set(steve, BigDecimal.TEN).join().status());

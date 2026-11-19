@@ -1,6 +1,7 @@
 package net.loyalnetwork.coffeelib.core.event;
 
 import net.loyalnetwork.coffeelib.api.event.EventBus;
+import net.loyalnetwork.coffeelib.api.di.ServiceContainer;
 import net.loyalnetwork.coffeelib.api.event.EventPriority;
 import net.loyalnetwork.coffeelib.api.event.EventResult;
 import net.loyalnetwork.coffeelib.api.event.EventSubscription;
@@ -26,15 +27,21 @@ public final class DefaultEventBus implements EventBus {
 
     private final EventRegistry registry;
     private final String ownerId;
+    private final ServiceContainer services;
 
     /** A private bus: its own registry, isolated from every other owner. */
     public DefaultEventBus(String ownerId) {
-        this(new EventRegistry(), ownerId);
+        this(new EventRegistry(), ownerId, null);
     }
 
     DefaultEventBus(EventRegistry registry, String ownerId) {
+        this(registry, ownerId, null);
+    }
+
+    DefaultEventBus(EventRegistry registry, String ownerId, ServiceContainer services) {
         this.registry = registry;
         this.ownerId = ownerId;
+        this.services = services;
     }
 
     @Override
@@ -59,6 +66,7 @@ public final class DefaultEventBus implements EventBus {
 
     @Override
     public void register(Object listener) {
+        if (services != null) services.wire(listener);
         registry.register(ownerId, listener);
     }
 

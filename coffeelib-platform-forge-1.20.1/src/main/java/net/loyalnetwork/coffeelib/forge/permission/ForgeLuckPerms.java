@@ -3,6 +3,8 @@ package net.loyalnetwork.coffeelib.forge.permission;
 import net.luckperms.api.LuckPerms;
 import net.luckperms.api.LuckPermsProvider;
 import net.luckperms.api.cacheddata.CachedPermissionData;
+import net.luckperms.api.cacheddata.CachedMetaData;
+import net.loyalnetwork.coffeelib.core.permission.PermissionNumbers;
 import net.luckperms.api.model.user.User;
 import net.luckperms.api.util.Tristate;
 import net.minecraft.server.level.ServerPlayer;
@@ -33,6 +35,11 @@ final class ForgeLuckPerms {
         return installed() ? Api.check(ForgePermissions.player(subject), player, node) : null;
     }
 
+    /** Loaded, contextual metadata is preferred; effective granted nodes are the fallback. */
+    static Integer number(ServerPlayer online, UUID player, String prefix) {
+        return installed() ? Api.number(online, player, prefix) : null;
+    }
+
     private static boolean installed() {
         Boolean known = installed;
         if (known == null) {
@@ -60,6 +67,23 @@ final class ForgeLuckPerms {
             return result == Tristate.UNDEFINED ? null : result.asBoolean();
         }
 
+        static Integer number(ServerPlayer online, UUID player, String prefix) {
+            LuckPerms luckPerms;
+            try { luckPerms = LuckPermsProvider.get(); }
+            catch (IllegalStateException notLoaded) { return null; }
+            User user = luckPerms.getUserManager().getUser(player);
+            CachedPermissionData permissions = permissionData(luckPerms, online, player);
+            if (permissions == null) return null;
+            CachedMetaData meta = null;
+            if (online != null) {
+                try { meta = luckPerms.getPlayerAdapter(ServerPlayer.class).getMetaData(online); }
+                catch (IllegalStateException | IllegalArgumentException notTracked) { /* user fallback */ }
+            }
+            if (meta == null && user != null) meta = user.getCachedData().getMetaData();
+            Integer configured = meta == null ? null : PermissionNumbers.parse(meta.getMetaValue(prefix));
+            return configured != null ? configured : PermissionNumbers.highestGranted(prefix, permissions.getPermissionMap());
+        }
+
         /**
          * An online player's data through the player adapter, which applies
          * their current contexts (world, gamemode...). Otherwise - an offline
@@ -71,7 +95,7 @@ final class ForgeLuckPerms {
             if (online != null) {
                 try {
                     return luckPerms.getPlayerAdapter(ServerPlayer.class).getPermissionData(online);
-                } catch (IllegalStateException notTracked) {
+                } catch (IllegalStateException | IllegalArgumentException notTracked) {
                     // fall back to the user, if loaded
                 }
             }

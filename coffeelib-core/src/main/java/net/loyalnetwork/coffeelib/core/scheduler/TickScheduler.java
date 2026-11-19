@@ -8,7 +8,10 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Queue;
+import java.util.Set;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executor;
 import java.util.function.BooleanSupplier;
@@ -32,9 +35,14 @@ public final class TickScheduler implements Scheduler {
     private final String ownerId;
     private final BooleanSupplier onMainThread;
     private final Queue<Runnable> queued = new ConcurrentLinkedQueue<>();
+    // Futures bridged to the server thread belong to the current server lifecycle.
+    // Without cancellation, stop() can strand them forever or deliver old-world data
+    // into the next integrated server when their database / I/O task finishes late.
+    private final Set<CompletableFuture<?>> waitingOnMain = ConcurrentHashMap.newKeySet();
     private final List<Timed> timed = new ArrayList<>();
     private final Executor main = this::onMain;
     private long ticks;
+    private volatile long lifecycleGeneration;
 
     /**
      * @param ownerId      the mod the tasks belong to, for log lines
@@ -81,14 +89,31 @@ public final class TickScheduler implements Scheduler {
 
     @Override
     public <T> CompletableFuture<T> onMain(CompletableFuture<T> future) {
+        Objects.requireNonNull(future, "future");
         CompletableFuture<T> result = new CompletableFuture<>();
-        future.whenComplete((value, error) -> onMain(() -> {
-            if (error != null) {
-                result.completeExceptionally(error);
-            } else {
-                result.complete(value);
+        final long createdInGeneration;
+        synchronized (this) {
+            createdInGeneration = lifecycleGeneration;
+            waitingOnMain.add(result);
+        }
+        result.whenComplete((value, error) -> waitingOnMain.remove(result));
+        future.whenComplete((value, error) -> {
+            if (result.isDone()) {
+                return; // The server stopped while the original future was pending.
             }
-        }));
+            onMain(() -> {
+                if (result.isDone()) {
+                    return; // The server stopped after the completion was queued.
+                }
+                if (lifecycleGeneration != createdInGeneration) {
+                    result.completeExceptionally(new CancellationException("Server lifecycle changed"));
+                } else if (error != null) {
+                    result.completeExceptionally(error);
+                } else {
+                    result.complete(value);
+                }
+            });
+        });
         return result;
     }
 
@@ -132,13 +157,22 @@ public final class TickScheduler implements Scheduler {
         }
     }
 
-    /** Cancels every task and drops the queue: the server stopped. */
+    /** Cancels scheduled tasks and pending server-thread futures: the server stopped. */
     public void stop() {
+        final List<CompletableFuture<?>> abandoned;
         synchronized (this) {
+            lifecycleGeneration++;
             for (Timed task : timed) {
                 task.cancelled = true;
             }
             timed.clear();
+            abandoned = List.copyOf(waitingOnMain);
+        }
+        // Complete outside the lock: client continuations may execute inline.
+        // This must happen even if the original database / I/O future never completes.
+        for (CompletableFuture<?> future : abandoned) {
+            future.completeExceptionally(new CancellationException(
+                    "Server stopped before the future could complete on its main thread"));
         }
         queued.clear();
     }

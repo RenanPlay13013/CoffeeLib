@@ -37,11 +37,16 @@ public final class TextCommandDispatcher {
         this.mainThread = mainThread;
     }
 
-    /** Adds definitions, refusing a path that is already taken. */
-    public void addAll(List<CommandDefinition> added) {
+    /** Checks registration for duplicate paths without changing the dispatcher. */
+    public void validateAddAll(List<CommandDefinition> added) {
         List<CommandDefinition> combined = new ArrayList<>(definitions);
         combined.addAll(added);
         CommandScanner.requireNoDuplicates(combined);
+    }
+
+    /** Adds definitions, refusing a path that is already taken. */
+    public void addAll(List<CommandDefinition> added) {
+        validateAddAll(added);
         definitions.addAll(added);
     }
 

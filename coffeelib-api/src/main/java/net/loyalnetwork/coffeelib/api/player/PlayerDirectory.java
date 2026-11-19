@@ -2,6 +2,8 @@ package net.loyalnetwork.coffeelib.api.player;
 
 import net.loyalnetwork.coffeelib.api.event.EventSubscription;
 
+import java.util.List;
+
 /**
  * Who can see whom, shared by every mod and plugin on CoffeeLib.
  * <p>
@@ -23,6 +25,30 @@ public interface PlayerDirectory {
      * {@code PlayerVisibility.class}; {@code unsubscribe()} removes the rule.
      */
     EventSubscription visibility(PlayerVisibility rule);
+
+    /**
+     * Registers a visibility rule belonging to an owner (plugin/mod id). This
+     * overload allows the platform to release the rule at the owner's unload.
+     * Use this for all new plugins; the old overload remains for compatibility.
+     *
+     * <p>Default throws for alternative PlayerDirectory implementations rather
+     * than silently losing the owner lifecycle guarantee.
+     */
+    default EventSubscription visibility(String ownerId, PlayerVisibility rule) {
+        throw new UnsupportedOperationException("Owner-bound visibility rules are not implemented here");
+    }
+
+    /**
+     * Online players visible to {@code viewer}. The console (null) sees all.
+     * Must be called on the server thread because platform player directories
+     * and visibility providers can access live game state.
+     *
+     * <p>Returned list is a snapshot, not a live view. This default keeps
+     * existing third-party PlayerDirectory implementations binary compatible.
+     */
+    default List<Object> visibleTo(Object viewer) {
+        throw new UnsupportedOperationException("Online player enumeration is not implemented here");
+    }
 
     /**
      * Whether {@code viewer} may see {@code target}. A {@code null} viewer is

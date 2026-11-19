@@ -24,6 +24,11 @@ public interface CommandSource {
     /** The player behind this source, in the platform's own type, or {@code null} if it is not a player. */
     Object player();
 
+    /** Default responses; platform adapters override these to render their native colors. */
+    default void success(String message) { sendMessage(message); }
+    default void info(String message) { sendMessage(message); }
+    default void error(String message) { sendMessage(message); }
+
     /** Whether {@link #player()} is non-null. */
     default boolean isPlayer() {
         return player() != null;

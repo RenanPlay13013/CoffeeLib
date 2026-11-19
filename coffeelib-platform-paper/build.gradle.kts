@@ -78,6 +78,9 @@ dependencies {
     testImplementation("com.github.MilkBowl:VaultAPI:1.7") {
         isTransitive = false
     }
+    // Optional permission-change callbacks. Do not bundle LuckPerms' API.
+    compileOnly("net.luckperms:api:5.4")
+
     compileOnly("me.clip:placeholderapi:2.11.6") {
         isTransitive = false
     }

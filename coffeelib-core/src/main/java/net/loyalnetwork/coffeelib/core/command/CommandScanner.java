@@ -17,6 +17,8 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.Parameter;
+import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -83,7 +85,7 @@ public final class CommandScanner {
             }
 
             Parameter[] parameters = method.getParameters();
-            Class<?> senderType = parameters.length > 0 && isSender(parameters[0]) ? parameters[0].getType() : null;
+            Class<?> senderType = parameters.length > 0 && isSender(parameters[0], types) ? parameters[0].getType() : null;
             List<ParameterDefinition> arguments = arguments(handler, where, parameters, senderType != null ? 1 : 0,
                     types);
             boolean replaces = command.replaces() || (group != null && group.replaces());
@@ -145,7 +147,7 @@ public final class CommandScanner {
      * so is any first parameter annotated as one ({@code @Arg}, {@code @OrSelf}...):
      * {@code god(@OrSelf ServerPlayer target)} takes a target, not a sender.
      */
-    private static boolean isSender(Parameter parameter) {
+    private static boolean isSender(Parameter parameter, ArgumentTypes types) {
         if (CommandSource.class.isAssignableFrom(parameter.getType())) {
             return true;
         }
@@ -155,7 +157,16 @@ public final class CommandScanner {
                 return false;
             }
         }
-        return kindOf(parameter.getType()) == null;
+        // Players are an intentional exception: a leading, unannotated player
+        // is traditionally the command's sender, even when it is a supported
+        // command argument. An @Arg/@OrSelf forces player-target semantics.
+        if (types.isPlayer(parameter.getType())) {
+            return true;
+        }
+        // Built-in and registered custom types (UUID, Duration, Kit, etc.)
+        // are arguments, not 'sender' values. Previously a bare first UUID
+        // was misclassified as the sender and failed only when executing.
+        return kindOf(parameter.getType()) == null && types.find(parameter) == null;
     }
 
     private static List<ParameterDefinition> arguments(Object handler, String where, Parameter[] parameters,
@@ -191,6 +202,14 @@ public final class CommandScanner {
                 if (parameter.isAnnotationPresent(Default.class)) {
                     throw new CoffeeLibException("@OrSelf " + context + " is already optional; remove its @Default");
                 }
+                if (i != parameters.length - 1) {
+                    throw new CoffeeLibException("@OrSelf " + context + " must be the last argument");
+                }
+            }
+
+            if (custom != null && custom.words() < 1) {
+                throw new CoffeeLibException("Custom " + context + " has an invalid words() count of "
+                        + custom.words() + "; expected at least 1");
             }
 
             if (parameter.isAnnotationPresent(Greedy.class)) {
@@ -285,6 +304,14 @@ public final class CommandScanner {
         }
 
         Method provider = findProvider(handler.getClass(), suggest.provider(), context);
+        Type declared = provider.getGenericReturnType();
+        if (declared instanceof ParameterizedType parameterized) {
+            Type[] arguments = parameterized.getActualTypeArguments();
+            if (arguments.length == 1 && arguments[0] instanceof Class<?> element && element != String.class) {
+                throw new CoffeeLibException("@Suggest provider '" + suggest.provider() + "' for " + context
+                        + " returns Collection<" + element.getTypeName() + "> instead of Collection<String>");
+            }
+        }
         provider.setAccessible(true);
         Class<?> takes = provider.getParameterCount() == 1 ? provider.getParameterTypes()[0] : null;
         // CommandSource first, so a provider taking Object keeps the old meaning.

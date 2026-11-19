@@ -10,6 +10,9 @@ import java.lang.reflect.Modifier;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
+import java.util.function.Consumer;
+import net.loyalnetwork.coffeelib.api.event.EventSubscription;
 
 /**
  * One owner's {@link PermissionManager} over the shared node registry and a
@@ -20,10 +23,17 @@ public class DefaultPermissionManager implements PermissionManager {
 
     private final String ownerId;
     private final PermissionResolver resolver;
+    private final java.util.function.BiFunction<Object, String, Integer> numericProvider;
 
     public DefaultPermissionManager(String ownerId, PermissionResolver resolver) {
-        this.ownerId = ownerId;
-        this.resolver = resolver;
+        this(ownerId, resolver, (subject, prefix) -> null);
+    }
+
+    public DefaultPermissionManager(String ownerId, PermissionResolver resolver,
+                                    java.util.function.BiFunction<Object, String, Integer> numericProvider) {
+        this.ownerId = java.util.Objects.requireNonNull(ownerId, "ownerId");
+        this.resolver = java.util.Objects.requireNonNull(resolver, "resolver");
+        this.numericProvider = java.util.Objects.requireNonNull(numericProvider, "numericProvider");
     }
 
     @Override
@@ -68,6 +78,30 @@ public class DefaultPermissionManager implements PermissionManager {
     @Override
     public boolean has(Object subject, String node) {
         return resolver.has(subject, node);
+    }
+
+    @Override
+    public EventSubscription onChange(Consumer<UUID> listener) {
+        return SharedPermissionChanges.subscribe(ownerId, listener);
+    }
+
+    @Override
+    public void declareRange(String prefix, int first, int last) {
+        PermissionNumbers.requirePrefix(prefix);
+        if (first < 0 || last < first || (long) last - first >= 10_000L) {
+            throw new CoffeeLibException("Numeric permission range must contain 1..10000 nonnegative values");
+        }
+        for (long i = first; i <= last; i++) {
+            declare(prefix + "." + i, PermissionDefault.NOBODY, "Numeric permission level " + i);
+        }
+    }
+
+    @Override
+    public int number(Object subject, String prefix, int fallback) {
+        PermissionNumbers.requirePrefix(prefix);
+        Integer external = numericProvider.apply(subject, prefix);
+        if (external != null) return external;
+        return PermissionNumbers.highestDeclared(prefix, declared(), node -> has(subject, node), fallback);
     }
 
     @Override

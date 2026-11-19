@@ -4,6 +4,7 @@ import net.loyalnetwork.coffeelib.api.command.CommandSource;
 import net.loyalnetwork.coffeelib.forge.permission.ForgePermissions;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.Component;
+import net.loyalnetwork.coffeelib.forge.text.ForgeTextFormatter;
 import net.minecraft.server.level.ServerPlayer;
 
 /**
@@ -33,6 +34,17 @@ public final class ForgeCommandContext implements CommandSource {
     public void sendMessage(String message) {
         stack.sendSystemMessage(Component.literal(message));
     }
+
+    private static final ForgeTextFormatter TEXT = new ForgeTextFormatter();
+
+    @Override
+    public void success(String message) { stack.sendSystemMessage(TEXT.parse("&a" + message)); }
+
+    @Override
+    public void info(String message) { stack.sendSystemMessage(TEXT.parse("&7" + message)); }
+
+    @Override
+    public void error(String message) { stack.sendSystemMessage(TEXT.parse("&c" + message)); }
 
     @Override
     public boolean hasPermission(String permission) {

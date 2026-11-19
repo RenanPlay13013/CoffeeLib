@@ -2,13 +2,23 @@ package net.loyalnetwork.coffeelib.paper;
 
 import net.loyalnetwork.coffeelib.api.database.Database;
 import net.loyalnetwork.coffeelib.core.economy.SharedEconomy;
+import net.loyalnetwork.coffeelib.core.command.CommandRoots;
+import net.loyalnetwork.coffeelib.core.player.SharedPlayers;
 import net.loyalnetwork.coffeelib.core.event.SharedEventBus;
+import net.loyalnetwork.coffeelib.core.di.SharedServices;
 import net.loyalnetwork.coffeelib.database.OpenDatabases;
 import net.loyalnetwork.coffeelib.paper.placeholder.PaperPlaceholderManager;
+import net.loyalnetwork.coffeelib.paper.scheduler.PaperScheduler;
+import net.loyalnetwork.coffeelib.paper.permission.PaperPermissionEvents;
+import net.loyalnetwork.coffeelib.core.permission.SharedPermissionChanges;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
+import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.Listener;
 import org.bukkit.event.server.PluginDisableEvent;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.Bukkit;
+import org.bukkit.entity.Player;
 
 import java.util.List;
 import java.util.Map;
@@ -24,12 +34,19 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class CoffeeLibPlugin extends JavaPlugin implements Listener {
 
+    private PaperPermissionEvents permissionEvents;
+
     /** Databases of disabled plugins, waiting for the next tick to be closed. */
     private final Map<List<Database>, String> pendingClose = new ConcurrentHashMap<>();
 
     @Override
     public void onEnable() {
         getServer().getPluginManager().registerEvents(this, this);
+        permissionEvents = new PaperPermissionEvents(this);
+        permissionEvents.start();
+        SharedPlayers.configureOnlinePlayers(Bukkit::getOnlinePlayers,
+                (viewer, target) -> !(viewer instanceof Player player && target instanceof Player other)
+                        || player == other || player.canSee(other));
         // The economy bridge names Vault's classes, so it is only loaded when Vault is there.
         if (getServer().getPluginManager().getPlugin("Vault") != null) {
             net.loyalnetwork.coffeelib.paper.economy.VaultBridge.install(this,
@@ -45,9 +62,20 @@ public final class CoffeeLibPlugin extends JavaPlugin implements Listener {
      * way a /reload turns into duplicated or impossible behavior. Clearing them
      * here means a plugin gets this right without having to remember to.
      */
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onPlayerDeath(PlayerDeathEvent event) {
+        net.loyalnetwork.coffeelib.paper.player.PaperPlayerDataFactory.onDeath(event.getEntity());
+    }
+
     @EventHandler
     public void onPluginDisable(PluginDisableEvent event) {
+        PaperScheduler.cancelOwner(event.getPlugin());
+        net.loyalnetwork.coffeelib.paper.player.PaperPlayerDataFactory.releaseOwner(event.getPlugin().getName());
+        SharedPermissionChanges.releaseOwner(event.getPlugin().getName());
+        CommandRoots.releaseOwner(event.getPlugin().getName());
+        SharedPlayers.releaseOwner(event.getPlugin().getName());
         SharedEventBus.unregisterAll(event.getPlugin().getName());
+        SharedServices.releaseOwner(event.getPlugin().getName());
         // Same reasoning for placeholders: a resolver holds the plugin's objects, and a
         // published PlaceholderAPI expansion would keep answering for a plugin that is gone.
         PaperPlaceholderManager.cleanUp(event.getPlugin().getName());
@@ -77,6 +105,12 @@ public final class CoffeeLibPlugin extends JavaPlugin implements Listener {
 
     @Override
     public void onDisable() {
+        if (permissionEvents != null) permissionEvents.stop();
+        PaperScheduler.cancelOwner(this);
+        CommandRoots.releaseOwner(getName());
+        SharedPlayers.clearAll();
+        net.loyalnetwork.coffeelib.paper.player.PaperPlayerDataFactory.clearAll();
+        SharedServices.clearAll();
         pendingClose.forEach((databases, owner) -> OpenDatabases.close(owner, databases));
         pendingClose.clear();
         OpenDatabases.closeAll();

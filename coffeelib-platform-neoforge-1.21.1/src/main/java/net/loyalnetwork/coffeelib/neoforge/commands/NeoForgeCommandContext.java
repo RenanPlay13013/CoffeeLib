@@ -4,6 +4,7 @@ import net.loyalnetwork.coffeelib.api.command.CommandSource;
 import net.loyalnetwork.coffeelib.neoforge.permission.NeoForgePermissions;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.Component;
+import net.loyalnetwork.coffeelib.neoforge.text.NeoForgeTextFormatter;
 import net.minecraft.server.level.ServerPlayer;
 
 /**
@@ -33,6 +34,17 @@ public final class NeoForgeCommandContext implements CommandSource {
     public void sendMessage(String message) {
         stack.sendSystemMessage(Component.literal(message));
     }
+
+    private static final NeoForgeTextFormatter TEXT = new NeoForgeTextFormatter();
+
+    @Override
+    public void success(String message) { stack.sendSystemMessage(TEXT.parse("&a" + message)); }
+
+    @Override
+    public void info(String message) { stack.sendSystemMessage(TEXT.parse("&7" + message)); }
+
+    @Override
+    public void error(String message) { stack.sendSystemMessage(TEXT.parse("&c" + message)); }
 
     @Override
     public boolean hasPermission(String permission) {

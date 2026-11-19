@@ -1,6 +1,8 @@
 package net.loyalnetwork.coffeelib.core.command;
 
 import net.loyalnetwork.coffeelib.api.command.CommandSource;
+import net.loyalnetwork.coffeelib.api.command.CommandArgument;
+import net.loyalnetwork.coffeelib.api.command.annotation.OrSelf;
 import net.loyalnetwork.coffeelib.api.command.annotation.Arg;
 import net.loyalnetwork.coffeelib.api.command.annotation.Command;
 import net.loyalnetwork.coffeelib.api.command.annotation.Default;
@@ -24,6 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
 /**
  * The platform-independent half of the command system, driven through the
@@ -377,7 +380,7 @@ class CommandSystemTest {
 
     static final class UnsupportedType {
         @Command("x")
-        void x(CommandSource source, @Arg("when") java.time.Duration when) {
+        void x(CommandSource source, @Arg("uri") java.net.URI uri) {
         }
     }
 
@@ -406,11 +409,144 @@ class CommandSystemTest {
     static final class NoCommands {
     }
 
+    static final class FirstUuidArgument {
+        java.util.UUID received;
+        @Command("uuid")
+        void uuid(java.util.UUID id) { received = id; }
+    }
+
+    static final class FirstCustomArgument {
+        java.net.URI received;
+        @Command("url")
+        void url(java.net.URI uri) { received = uri; }
+    }
+
+    @Test
+    void aKnownCustomTypeInFirstPositionIsNotMistakenForTheSender() {
+        FirstUuidArgument handler = new FirstUuidArgument();
+        TextCommandDispatcher dispatcher = dispatcher(handler);
+        java.util.UUID id = java.util.UUID.randomUUID();
+        assertTrue(dispatcher.execute(new FakeSource(null), "uuid", args(id.toString())));
+        assertEquals(id, handler.received);
+    }
+
+    @Test
+    void customFirstArgumentFromRegisteredParserUsesTheParser() {
+        FirstCustomArgument handler = new FirstCustomArgument();
+        ArgumentTypes types = ArgumentTypes.withDefaults();
+        types.register(java.net.URI.class, (source, input) -> java.net.URI.create(input));
+        TextCommandDispatcher dispatcher = new TextCommandDispatcher();
+        dispatcher.addAll(CommandScanner.scan("test", handler, types));
+        assertTrue(dispatcher.execute(new FakeSource(null), "url", args("https://example.com")));
+        assertEquals(java.net.URI.create("https://example.com"), handler.received);
+    }
+
+    static final class InvalidSuggestionProviderType {
+        @Command("wrong")
+        void wrong(@Arg("item") @Suggest(provider = "notStrings") String item) {}
+        Collection<Integer> notStrings() { return List.of(1, 2, 3); }
+    }
+
+    @Test
+    void aSuggestionProviderReturningNumbersFailsAtRegistration() {
+        assertRejected(new InvalidSuggestionProviderType(), "instead of Collection<String>");
+    }
+
+    static final class OrSelfFollowedByOptional {
+        @Command("heal")
+        void heal(@OrSelf FakePlayer target, @Arg("reason") @Default("none") String reason) {
+        }
+    }
+
+    static final class InvalidWordCount {
+        @Command("locate")
+        void locate(CommandSource source, @Arg("spot") java.net.URI spot) {
+        }
+    }
+
+    private static ArgumentTypes fakePlayerTypes() {
+        ArgumentTypes types = ArgumentTypes.withDefaults();
+        types.markPlayer(FakePlayer.class);
+        types.register(FakePlayer.class, new CommandArgument<>() {
+            @Override
+            public FakePlayer parse(CommandSource source, String input) {
+                return new FakePlayer();
+            }
+        });
+        return types;
+    }
+
+    @Test
+    void orSelfMustBeTheLastParameterEvenWhenTheNextOneIsOptional() {
+        CoffeeLibException e = assertThrows(CoffeeLibException.class,
+                () -> CommandScanner.scan("test", new OrSelfFollowedByOptional(), fakePlayerTypes()));
+        assertTrue(e.getMessage().contains("must be the last argument"));
+        assertTrue(e.getMessage().contains("#heal"));
+    }
+
+    @Test
+    void invalidMultiwordParserFailsAtRegistration() {
+        ArgumentTypes types = ArgumentTypes.withDefaults();
+        types.register(java.net.URI.class, new CommandArgument<>() {
+            @Override
+            public java.net.URI parse(CommandSource source, String input) {
+                return java.net.URI.create(input);
+            }
+            @Override
+            public int words() { return 0; }
+        });
+        CoffeeLibException e = assertThrows(CoffeeLibException.class,
+                () -> CommandScanner.scan("test", new InvalidWordCount(), types));
+        assertTrue(e.getMessage().contains("invalid words() count"));
+    }
+
+    static final class GodCommand {
+        FakePlayer last;
+        @Command(value = "god", permission = "god.use")
+        void god(CommandSource sender, @OrSelf(others = "god.others") FakePlayer player) {
+            last = player;
+        }
+    }
+
+    @Test
+    void orSelfUsesSenderAndChecksPermissionForExplicitTargets() {
+        FakePlayer self = new FakePlayer();
+        FakePlayer other = new FakePlayer();
+        GodCommand commands = new GodCommand();
+        ArgumentTypes types = ArgumentTypes.withDefaults();
+        types.markPlayer(FakePlayer.class);
+        types.register(FakePlayer.class, new CommandArgument<>() {
+            @Override
+            public FakePlayer parse(CommandSource source, String input) {
+                return "other".equals(input) ? other : self;
+            }
+            @Override
+            public Collection<String> suggest(net.loyalnetwork.coffeelib.api.command.SuggestContext context) {
+                return List.of("other", "self");
+            }
+        });
+        TextCommandDispatcher dispatcher = new TextCommandDispatcher();
+        dispatcher.addAll(CommandScanner.scan("test", commands, types));
+        FakeSource user = new FakeSource(self, "god.use");
+        assertTrue(dispatcher.complete(user, "god", args("")).isEmpty(),
+                "cannot reveal names of players without the others permission");
+        assertTrue(dispatcher.execute(user, "god", args()));
+        assertSame(self, commands.last);
+        assertFalse(dispatcher.execute(user, "god", args("other")));
+        assertSame(self, commands.last);
+        assertTrue(user.messages.get(user.messages.size() - 1).contains("other players"));
+        FakeSource privileged = new FakeSource(self, "god.use", "god.others");
+        assertEquals(List.of("other", "self"), dispatcher.complete(privileged, "god", args("")));
+        assertTrue(dispatcher.execute(privileged, "god", args("other")));
+        assertSame(other, commands.last);
+    }
+
+
     @Test
     void mistakesInAHandlerFailAtRegistrationNamingTheMethod() {
         assertRejected(new OptionalBeforeRequired(), "optional arguments must be last");
         assertRejected(new GreedyNotLast(), "must be the last argument");
-        assertRejected(new UnsupportedType(), "Unsupported type Duration");
+        assertRejected(new UnsupportedType(), "Unsupported type URI");
         assertRejected(new MissingProvider(), "names no method");
         assertRejected(new BadDefault(), "'many' is not a valid whole number");
         assertRejected(new Duplicate(), "More than one @Command method");
@@ -428,6 +564,43 @@ class CommandSystemTest {
         TextCommandDispatcher dispatcher = dispatcher(new CrateCommands());
         assertThrows(CoffeeLibException.class,
                 () -> dispatcher.addAll(CommandScanner.scan("other", new CrateCommands())));
+    }
+
+    @Test
+    void aFailedCommandRegistrationPreflightDoesNotChangeTheDispatcher() {
+        TextCommandDispatcher dispatcher = dispatcher(new CrateCommands());
+        int count = dispatcher.definitions().size();
+        List<CommandDefinition> repeated = CommandScanner.scan("new-owner", new CrateCommands());
+
+        assertThrows(CoffeeLibException.class, () -> dispatcher.validateAddAll(repeated));
+        assertEquals(count, dispatcher.definitions().size());
+    }
+
+    static final class ReplacingCommands {
+        @Command(value = "warp", replaces = true)
+        void warp() {}
+    }
+
+    static final class OtherCommands {
+        @Command("warp")
+        void warp() {}
+    }
+
+    @Test
+    void disabledOwnerDoesNotKeepACommandReplacementClaimForever() {
+        CommandRoots.clear();
+        try {
+            var original = CommandScanner.scan("first", new ReplacingCommands());
+            var next = CommandScanner.scan("next", new OtherCommands());
+            CommandRoots.claim("first", original);
+            assertThrows(CoffeeLibException.class, () -> CommandRoots.claim("next", next));
+
+            CommandRoots.releaseOwner("first");
+            CommandRoots.claim("next", next);
+            assertFalse(CommandRoots.isReplaced("warp"));
+        } finally {
+            CommandRoots.clear();
+        }
     }
 
     @Test

@@ -2,6 +2,7 @@ package net.loyalnetwork.coffeelib.paper.commands;
 
 import net.loyalnetwork.coffeelib.api.command.CommandArgument;
 import net.loyalnetwork.coffeelib.api.command.CommandManager;
+import net.loyalnetwork.coffeelib.core.command.CommandServices;
 import net.loyalnetwork.coffeelib.api.exception.CoffeeLibException;
 import net.loyalnetwork.coffeelib.api.permission.PermissionDefault;
 import net.loyalnetwork.coffeelib.core.command.ArgumentTypes;
@@ -51,9 +52,11 @@ public final class PaperCommandManager implements CommandManager {
 
     @Override
     public synchronized void register(Object handler) {
+        CommandServices.wire(plugin.getName(), handler);
         List<CommandDefinition> definitions = CommandScanner.scan(plugin.getName(), handler, types);
-        dispatcher.addAll(definitions);
+        dispatcher.validateAddAll(definitions);
         CommandRoots.claim(plugin.getName(), definitions);
+        dispatcher.addAll(definitions);
 
         // Known to Bukkit - and so to LuckPerms' editor - with its @Permission default or the one
         // the op level implies.

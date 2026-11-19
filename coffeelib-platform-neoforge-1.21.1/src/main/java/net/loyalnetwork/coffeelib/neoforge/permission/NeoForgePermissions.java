@@ -64,6 +64,12 @@ public final class NeoForgePermissions {
         return RESOLVER.has(subject, node, operatorLevel);
     }
 
+    /** Numeric grants from LuckPerms, when present; no database loads. */
+    public static Integer number(Object subject, String prefix) {
+        ServerPlayer player = player(subject);
+        return player == null ? null : NeoForgeLuckPerms.number(player, player.getUUID(), prefix);
+    }
+
     /** The player behind {@code subject}: a player, a player's command source, or a CoffeeLib source wrapping one. */
     static ServerPlayer player(Object subject) {
         if (subject instanceof ServerPlayer player) {

@@ -38,6 +38,10 @@ final class ProviderEntry {
         if (!resolved) {
             try {
                 value = method.invoke(owner);
+                if (value == null) {
+                    throw new ServiceException("@Provide method '" + method.getName() + "' on "
+                            + owner.getClass().getName() + " returned null");
+                }
             } catch (IllegalAccessException | InvocationTargetException e) {
                 throw new ServiceException("Provider method '" + method.getName() + "' on "
                         + owner.getClass().getName() + " threw while resolving", e);

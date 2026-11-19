@@ -398,6 +398,62 @@ Rules:
   receivers that consume them are wired. Wiring fails immediately otherwise.
 * A failed `wire()` does not half-apply fields and does not cache the failure.
 
+### Platform-owned services (Phase 3)
+
+The existing manual `new DefaultServiceContainer()` workflow remains supported.
+For CoffeeLib-owned command handlers and event listeners, however, use the
+**owner-scoped** registry. It is available on all three platforms:
+
+```java
+// Paper, from your plugin:
+ServiceContainer services = CoffeeLib.services(this);
+// Forge, from your mod's constructor or anywhere with a mod id:
+ServiceContainer services = CoffeeLib.services("yourmod");
+// NeoForge, using the ModContainer:
+ServiceContainer services = CoffeeLib.services(container);
+```
+
+The first call for an owner creates a single container with four ready-to-use
+providers: `PermissionManager`, `Scheduler`, `DatabaseManager` and
+`PlayerDirectory`. Repeated calls return that same container. To provide your
+own application services, register a provider host **before** its consumers:
+
+```java
+class AppProviders {
+    private final PlayerRepository repo;
+    AppProviders(PlayerRepository repo) { this.repo = repo; }
+    @Provide PlayerRepository players() { return repo; }
+}
+
+CoffeeLib.services(owner).register(new AppProviders(repo));
+
+class HomeCommand {
+    @Receive private PlayerRepository players;
+    @Receive private Scheduler scheduler;
+
+    @Command("home")
+    void home(CommandSource source) { /* use injected services */ }
+}
+
+CoffeeLib.commands(owner).register(new HomeCommand());
+CoffeeLib.eventBus(owner).register(new HomeListener());
+```
+
+For Paper, `owner` means the `JavaPlugin` instance; for Forge it means the
+`String` mod id; NeoForge accepts `ModContainer` or a `String` mod id.
+`commands(...).register(handler)` and `eventBus(...).register(listener)` now
+wire `@Receive` **before registration**. A missing, ambiguous, static or final
+field fails immediately. Injection traverses superclasses, not just the
+receiver's concrete class. If any provider is missing, no receiver field is
+written. Providers must not return `null`.
+
+On Paper, CoffeeLib releases the owner registry when its plugin is disabled,
+preventing a classloader leak across normal reloads. Forge and NeoForge keep
+owner registries for the mod's JVM lifetime; do not store world/player entities
+as persistent providers. This release does **not** yet add automatic permission
+change events or the cross-platform `TextFormatter` / message catalog. Those
+remain future work, as do live-server integration tests.
+
 ---
 
 ## Scheduler
@@ -429,6 +485,11 @@ CompletableFuture<Optional<Home>> home = scheduler.onMain(repository.findById(id
   disabled (Paper). Work scheduled while no server runs — from a mod
   constructor, or between two worlds of a client — waits for the next server's
   first tick.
+* **Server-thread futures and shutdown:** `scheduler.onMain(future)` completes
+  exceptionally with `CancellationException` if the Forge/NeoForge server stops
+  before delivery (or the owning Paper plugin is disabled). This prevents a
+  database callback from a previous integrated world from running in the next.
+  Handle cancellation explicitly if a command should suppress shutdown errors.
 
 ---
 
@@ -646,6 +707,50 @@ Mistakes in a handler — an optional argument before a required one, an
 unsupported type, a missing provider, two methods for one path — fail at
 `register`, naming the method, rather than when someone runs the command.
 
+### Phase 2 — player visibility and typed arguments
+
+The `coffeelib-core` module has **no Minecraft types**. Platforms supply the
+native player/world/coordinate parsers, and plugins may register their own:
+
+```java
+commands.argument(Kit.class, (source, name) -> kits.require(name));
+```
+
+`UUID` and `Duration` (`1d2h30m`, `90s`) are available in core. A registered
+argument type in first position is an argument, not a sender; a leading,
+unannotated platform player type is still interpreted as the sender. Add
+`@Arg` or `@OrSelf` to make a leading player a target. `@OrSelf` must be the
+**last** parameter and, with `others = "myplugin.command.others"`, only offers
+other players to authorized senders.
+
+Paper additionally supports `Location` as a **three-word argument** (`x y z`,
+`~ ~ ~` and `~1 ~-2 ~`), taking the player's or command block's current world;
+console without a location gets a command error. Paper targets Spigot 1.8.8,
+so `NamespacedKey` cannot be added as an argument to this universal jar without
+raising that minimum API requirement; use the `String` name for that platform.
+Forge/NeoForge have `ResourceLocation`, `ServerLevel`, `Vec3`, `BlockPos`,
+`Holder<T>` with `@Registry`, and `ServerPlayer`.
+
+For a vanish plugin, register a rule with **its owner id** (the exact
+`JavaPlugin#getName()` on Paper), so CoffeeLib removes it when the plugin is
+disabled:
+
+```java
+PlayerDirectory players = CoffeeLib.players();
+EventSubscription vanish = players.visibility("MyVanish", (viewer, target) ->
+        !isVanished(target) || maySeeVanished(viewer));
+List<Object> visible = players.visibleTo(viewer);
+```
+
+`visibleTo` is a snapshot of currently online players, filtered by every
+CoffeeLib rule; on Paper it also honors Bukkit `Player.canSee`. A null viewer
+(console) sees all, and a player always sees themselves. Query live online
+players and visibility **only on the server thread**. When an owner id is not
+supplied, existing `visibility(rule)` remains supported but its returned
+subscription **must** be unsubscribed manually. On Forge/NeoForge, release
+owner-specific rules manually when the mod's own service stops using
+`SharedPlayers.releaseOwner(modId)`; mod loaders do not unload mods per world.
+
 ---
 
 ## Placeholders
@@ -769,6 +874,48 @@ Where CoffeeLib now checks nodes:
   `coffeelib.config.hotreload` and `coffeelib.placeholder`, all defaulting to
   operators — so a server can hand config reloads to staff without giving them op.
 
+### Permission-change notifications (Phase 3)
+
+Use `onChange` instead of polling every player inside each mod/plugin:
+
+```java
+PermissionManager permissions = CoffeeLib.permissions(container); // Forge: permissions(), Paper: permissions(this)
+EventSubscription subscription = permissions.onChange(uuid -> {
+    // This callback runs on the SERVER TICK THREAD, not LuckPerms' async thread.
+    // The UUID can refer to a player who has just disconnected.
+    // Resolve the player by UUID and re-check the relevant permission here.
+    // Example: re-apply fly mode if the player is currently online.
+});
+// Optional: subscription.unsubscribe();
+```
+
+This is an **invalidation hint**, not a guaranteed diff: it means permissions
+*may* have changed. Multiple updates to the same UUID before a tick are
+coalesced into one callback. Uncaught failures in one listener are logged with
+the owner and cannot stop other listeners. Subscriptions are kept by owner;
+Paper removes them on plugin disable, and Forge/NeoForge keep them for the
+mod's lifetime. The `EventSubscription` type is from `coffeelib-api`.
+
+* **All three platforms, with LuckPerms**: subscribe to
+  `UserDataRecalculateEvent`. The event can fire asynchronously; CoffeeLib
+  queues only the UUID and delivers on the next server tick. The API is
+  optional and never shaded into the jar.
+* **Forge/NeoForge**: also listen to `PermissionsChangedEvent` for op/deop;
+  canceled events are ignored when observed canceled. The two sources share
+  the tick-level deduplication queue. Events can be invalidation hints even
+  if a subsequent handler cancels the underlying change.
+* **Paper without LuckPerms**: one central poll **every 20 ticks** compares
+  online players' op status and effective values of all CoffeeLib-declared
+  nodes. Undeclared nodes, external plugin mutations without an observable
+  signal, and offline players cannot be watched reliably. The polling delay
+  grows if the server TPS drops; it is not a fixed one-second SLA.
+* Server shutdown stops accepting late callbacks; an integrated server opening
+  a new world resumes processing without replaying changes from the old world.
+
+Custom `PermissionManager` implementations written before this method existed
+remain binary-compatible: the interface's default implementation throws a
+clear `UnsupportedOperationException`; the built-in managers support it.
+
 ---
 
 ## Economy
@@ -820,8 +967,12 @@ coins.transfer(payer, payee, amount);                                // /pay
 * **Everything is asynchronous**: a provider on a database never blocks the
   server, and one in memory completes at once. Futures complete on the
   provider's thread - go back to the server thread before touching the world.
-* **`transfer` is a withdrawal then a deposit**; if the deposit fails, the
-  amount is given back. The provider sees two operations, not one atomic one.
+* **`transfer` is a withdrawal then a deposit**; if the recipient deposit
+  fails, CoffeeLib attempts a refund. A failed refund is logged and reported as
+  `FAILED` with a manual-reconciliation warning, not disguised as an ordinary
+  recipient failure. **This is not atomic:** a crash or database outage can
+  still lose money between operations. Use a transactional provider if
+  transfers must be atomic.
 * A provider is a plain object called from any thread: it must be thread-safe.
   On Paper, a plugin's currencies are withdrawn when it is disabled.
 
@@ -1271,3 +1422,164 @@ doing at every step and reviewed **everything manually** before it was
 committed. Nothing was merged as-is without my understanding.
 
 If something looks off, treat it as mine — not the AI's. I own the result.
+
+### Text and message catalogs (Phase 3 / item 8)
+
+The API defines `TextFormatter<C>` and `Messages<T>`. The **Java-only core** parses
+legacy `&`/`§` color and style codes, `&#RRGGBB`, `\&`, and templates with named
+`{placeholders}`. The renderer is platform-specific: **Forge/NeoForge** use
+`MutableComponent` (with RGB), while **Paper** exposes `String` because the
+module still targets the Spigot 1.8.8 API. On Paper, RGB is reduced to the
+closest legacy color. Parsing does not touch the world.
+
+```java
+@ConfigFile("messages")
+public class MyMessages {
+    public String welcome = "&aWelcome, {player}!";
+}
+
+// NeoForge 1.21.1
+Messages<MyMessages> messages = CoffeeLib.messages(container, MyMessages.class);
+messages.send(player, m -> m.welcome, "player", player.getName().getString());
+messages.reload();
+
+// Paper: CoffeeLib.messages(plugin, MyMessages.class)
+// Forge: CoffeeLib.messages("modid", MyMessages.class)
+```
+
+Message catalogs use **managed YAML** by default, even on Forge and NeoForge,
+where an ordinary `@ConfigFile` without an explicit format normally chooses
+native TOML. An explicit `format = JSON` or `HOCON` is respected. The catalog
+is loaded synchronously from the owner's folder (`plugins/<plugin>/messages.yml`
+on Paper; `config/<modid>/messages.yml` on Forge/NeoForge). It remains registered
+for `/coffeelib config reload` on Forge/NeoForge, and `messages.reload()` works
+on all platforms. The catalog retains its loaded model; reload updates fields
+in place. Initialize a given catalog once per owner; multiple independent
+instances are not automatically unified.
+
+`messages.send` schedules delivery on the owning platform's server scheduler;
+invalid/disconnected recipients are skipped. For command sources, the new
+`success`, `info`, and `error` helpers render default green, gray, and red
+responses in the native platform adapters. A custom `CommandSource` retains
+plain-text defaults for binary compatibility. Template replacement happens
+once: values containing `{something}` are not recursively expanded.
+
+**Current limitations:** the standard response colors are not configurable yet;
+missing YAML fields fall back according to the existing config loader, but
+one-time missing-key warnings have not been added. Real loader builds and
+server integration tests remain required before production use.
+
+**Design guidance:** Object Calisthenics and Domain-Driven Design are used as
+heuristics: immutable styled runs are value objects, message catalogs belong
+to the application domain, and Bukkit/Minecraft rendering remains in platform
+adapters. Do not sacrifice API compatibility, correctness, or runtime
+performance merely to satisfy a stylistic rule.
+
+## Phase 4 (incremental): numeric permissions and saved locations
+
+### Numeric limits
+
+`PermissionManager` now exposes `declareRange(prefix, first, last)` and
+`number(subject, prefix, fallback)`. Example:
+
+```java
+PermissionManager permissions = CoffeeLib.permissions(container); // NeoForge
+permissions.declareRange("ravenessentials.home.limit", 1, 10);
+int allowedHomes = permissions.number(player, "ravenessentials.home.limit", 1);
+```
+
+With LuckPerms, an integer meta value under `ravenessentials.home.limit` wins.
+Otherwise the highest effective **granted** `ravenessentials.home.limit.N` node is
+returned (including inherited contextual grants). Without LuckPerms, the library
+checks only nodes declared by this owner. Negative, malformed and overflowing
+numeric suffixes are ignored. Ranges grant nothing by default (`NOBODY`), and
+can declare up to 10,000 entries per call. No offline database calls occur.
+
+### Persisted location snapshot
+
+The `coffeelib-database` module provides
+`net.loyalnetwork.coffeelib.database.location.CoffeeLocation`, a JPA
+`@Embeddable` of `world, x, y, z, yaw, pitch, savedAt`. An entity holding more
+than one location can use JPA `@AttributeOverrides`. The class intentionally
+contains no Minecraft types and holds no live entity/world reference.
+
+Each platform has a `location.Locations` adapter with the same method names:
+
+```java
+// Import Locations from your chosen platform package, e.g. .neoforge.location.Locations
+CoffeeLocation saved = Locations.of(player);
+Optional<ServerLevel> destination = Locations.world(server, saved);
+boolean accepted = Locations.teleport(player, saved);
+```
+
+Paper uses a `Player`, Bukkit `Server` and `World`, with world **names** as ids;
+Forge/NeoForge use `ServerPlayer`, `MinecraftServer`, `ServerLevel` and
+namespaced dimension ids. Do not transfer a Paper world-name snapshot to a
+modded server without an explicit mapping. All three adapters require the
+server's primary/tick thread for reading, world lookup and teleportation. For
+work originating from database or I/O threads, first reschedule via the CoffeeLib
+`Scheduler`. Missing worlds or disconnected players return `false` from
+`teleport` rather than silently defaulting to the overworld. A cross-dimension
+teleport may replace the `ServerPlayer`; resolve its UUID again afterward.
+
+This is not a runtime-homologated Phase 4: platform integration still needs compilation against real loader dependencies and live-server tests.
+
+
+## Phase 4 (incremental): persistent player data (item 13)
+
+`coffeelib-api` now defines `PlayerDataFactory` and `PlayerData<T>`; these
+contracts do not import any Minecraft classes. Platform entry points create
+native storage adapters:
+
+```java
+// NeoForge 1.21.1 — call from the mod constructor, BEFORE attachment registration:
+PlayerDataFactory data = CoffeeLib.playerData(container);
+PlayerData<Boolean> god = data.copyOnDeath(true).flag("god");
+PlayerData<Integer> kills = data.integer("kills");
+PlayerData<String> nickname = data.text("nick");
+PlayerData<MySettings> settings = data.json("settings", MySettings.class);
+
+god.set(serverPlayer, true); // tick/server thread only
+boolean enabled = god.get(serverPlayer);
+```
+
+On **Forge 1.20.1**, use `CoffeeLib.playerData("yourmodid")` and a current
+`ServerPlayer`. On **Paper/Spigot 1.14+**, use
+`CoffeeLib.playerData(yourJavaPlugin)` and a current Bukkit `Player`.
+Registration is once per key per mod/plugin owner; names are lowercase
+`[a-z0-9._-]`, 1–64 characters. JSON uses Gson and a concrete Java class;
+absent JSON is `null`, and setting `null` removes/resets its value. Defaults
+are `false`, `0` and `""` for the three primitive kinds. A different field
+type under an existing key needs an explicit data migration.
+
+### Semantics and compatibility
+
+- **NeoForge 1.21.1:** one owner-namespaced `AttachmentType<String>` per key,
+  serialized using a codec; `copyOnDeath(true)` delegates to the native
+  attachment behavior. Declare all keys before registry freeze.
+- **Forge 1.20.1:** CoffeeLib registers one namespaced serialized capability on
+  players. Fields use `owner:key`; `PlayerEvent.Clone` copies only opted-in
+  keys on death, leaving End return alone. No player object is cached.
+- **Paper:** uses `PersistentDataContainer` through a version-gated reflective
+  adapter because this module must *still link against Spigot 1.8.8*. Calling
+  `playerData` on Bukkit < 1.14 throws `UnsupportedOperationException` clearly;
+  other CoffeeLib features retain the old baseline. An owner-only
+  `PlayerDeathEvent` listener clears non-copying keys after a death. It does
+  not clear keys for End portal returns (which can trigger respawn events).
+  Plugin disable clears owner descriptors, releasing class-loader references.
+- All operations on players require the **server thread**. Use CoffeeLib's
+  scheduler to return from futures before reading/writing a player. A stale or
+  disconnected player is rejected, not silently redirected. Storage saves
+  according to the platform's normal player-save lifecycle; changes are not
+  automatically synchronized to client mods.
+- A `copyOnDeath` view applies only to subsequently declared keys, not to
+  keys already registered. Death persistence defaults to `false`.
+
+**Validation performed:** 140 targeted Java tests (with a lightweight JUnit
+executor) passed; platform storage adapters compiled and ran isolated stubs.
+The Forge/NeoForge **real** loader builds, Paper 1.14+/modern PDC integration,
+and restart/respawn persistence on live servers are **not yet verified**. No
+assumption of production readiness should be made from a stubbed compile.
+
+**Still pending in Phase 4:** inventory/menus (item 15) and cross-platform
+runtime homologation.

@@ -115,9 +115,12 @@ final class RegistryCurrency implements Currency {
                 // Give it back, and report why the transfer did not happen.
                 return deposit(from, amount).thenApply(refunded -> {
                     if (!refunded.succeeded()) {
-                        LOGGER.severe("[CoffeeLib] Transfer of " + amount + " " + id + " from " + from + " to " + to
-                                + " failed on the deposit, and refunding " + from + " failed too ("
-                                + refunded.message() + "); the amount is lost");
+                        String warning = "Transfer of " + amount + " " + id + " from " + from + " to " + to
+                                + " failed on the recipient deposit (" + deposited.message() + "), and refunding "
+                                + from + " failed too (" + refunded.message()
+                                + "). Funds may be lost; manual reconciliation is required";
+                        LOGGER.severe("[CoffeeLib] " + warning);
+                        return TransactionResult.failure(Status.FAILED, warning);
                     }
                     return deposited;
                 });

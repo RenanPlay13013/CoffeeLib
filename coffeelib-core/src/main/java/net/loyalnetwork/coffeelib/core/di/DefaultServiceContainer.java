@@ -28,41 +28,61 @@ public final class DefaultServiceContainer implements ServiceContainer {
     private final Map<Class<?>, List<ProviderEntry>> providers = new HashMap<>();
 
     @Override
-    public void register(Object providerHost) {
+    public synchronized void register(Object providerHost) {
+        java.util.Objects.requireNonNull(providerHost, "providerHost");
+        // Validate every provider before publishing any: a malformed method must not
+        // leave an incomplete registration visible to a later wire().
+        Map<Class<?>, List<ProviderEntry>> staged = new HashMap<>();
         for (Method method : providerHost.getClass().getDeclaredMethods()) {
             Provide provide = method.getAnnotation(Provide.class);
-            if (provide == null) {
-                continue;
-            }
+            if (provide == null) continue;
             if (method.getParameterCount() != 0) {
                 throw new ServiceException("@Provide method '" + method.getName() + "' on "
                         + providerHost.getClass().getName() + " must take no arguments");
             }
-            if (method.getReturnType() == void.class) {
+            if (method.getReturnType() == void.class || method.getReturnType().isPrimitive()) {
                 throw new ServiceException("@Provide method '" + method.getName() + "' on "
-                        + providerHost.getClass().getName() + " must return a value");
+                        + providerHost.getClass().getName() + " must return a reference value");
             }
-
             method.setAccessible(true);
-            providers.computeIfAbsent(method.getReturnType(), type -> new ArrayList<>())
+            staged.computeIfAbsent(method.getReturnType(), type -> new ArrayList<>())
                     .add(new ProviderEntry(provide.value(), method, providerHost));
         }
+        staged.forEach((type, entries) -> providers.computeIfAbsent(type, key -> new ArrayList<>()).addAll(entries));
     }
 
     @Override
-    public void wire(Object receiverHost) {
-        for (Field field : receiverHost.getClass().getDeclaredFields()) {
-            Receive receive = field.getAnnotation(Receive.class);
-            if (receive == null) {
-                continue;
+    public synchronized void wire(Object receiverHost) {
+        java.util.Objects.requireNonNull(receiverHost, "receiverHost");
+        // Resolve all @Receive fields before touching the object; failure at register
+        // time must not leave a half-wired handler behind.
+        Map<Field, Object> resolved = new java.util.LinkedHashMap<>();
+        for (Class<?> type = receiverHost.getClass(); type != null && type != Object.class; type = type.getSuperclass()) {
+            for (Field field : type.getDeclaredFields()) {
+                Receive receive = field.getAnnotation(Receive.class);
+                if (receive == null) continue;
+                if (java.lang.reflect.Modifier.isFinal(field.getModifiers())
+                        || java.lang.reflect.Modifier.isStatic(field.getModifiers())) {
+                    throw new ServiceException("@Receive field '" + field.getName() + "' on "
+                            + receiverHost.getClass().getName() + " cannot be static or final");
+                }
+                field.setAccessible(true);
+                ProviderEntry entry;
+                try {
+                    entry = resolveEntry(field.getType(), receive.value());
+                } catch (MissingProviderException e) {
+                    throw new MissingProviderException("@Receive field '" + field.getName() + "' on "
+                            + receiverHost.getClass().getName() + ": " + e.getMessage(),
+                            e.getType(), e.getRequestedName());
+                }
+                resolved.put(field, entry.resolve());
             }
-            field.setAccessible(true);
-
-            ProviderEntry entry = resolveEntry(field.getType(), receive.value());
+        }
+        for (Map.Entry<Field, Object> field : resolved.entrySet()) {
             try {
-                field.set(receiverHost, entry.resolve());
-            } catch (IllegalAccessException e) {
-                throw new ServiceException("Could not set field '" + field.getName() + "' on "
+                field.getKey().set(receiverHost, field.getValue());
+            } catch (IllegalAccessException | IllegalArgumentException e) {
+                throw new ServiceException("Could not set @Receive field '" + field.getKey().getName() + "' on "
                         + receiverHost.getClass().getName(), e);
             }
         }

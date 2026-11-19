@@ -1,6 +1,7 @@
 package net.loyalnetwork.coffeelib.core.event;
 
 import net.loyalnetwork.coffeelib.api.event.EventBus;
+import net.loyalnetwork.coffeelib.core.di.SharedServices;
 
 /**
  * The one registry every owner's bus handle shares, and the reason an event
@@ -33,7 +34,7 @@ public final class SharedEventBus {
      * handles for the same owner behave identically.
      */
     public static EventBus forOwner(String ownerId) {
-        return new DefaultEventBus(REGISTRY, ownerId);
+        return new DefaultEventBus(REGISTRY, ownerId, SharedServices.existing(ownerId));
     }
 
     /**
