@@ -20,5 +20,12 @@ public enum ArgumentKind {
     BOOLEAN,
 
     /** One word, matched case-insensitively against an enum's constants. */
-    ENUM
+    ENUM,
+
+    /**
+     * Read by a {@link net.loyalnetwork.coffeelib.api.command.CommandArgument}:
+     * the core's, the platform's or the owner's. Platforms with a native
+     * parser for the type (Brigadier's coordinates) use it; the rest read words.
+     */
+    CUSTOM
 }

@@ -35,20 +35,22 @@ public final class CommandDefinition {
     private final int permissionLevel;
     private final Permission declaredNode;
     private final String description;
+    private final boolean replaces;
     private final Object handler;
     private final Method method;
     private final Class<?> senderType;
     private final List<ParameterDefinition> parameters;
 
     CommandDefinition(String ownerId, List<String> path, String permission, int permissionLevel,
-                      Permission declaredNode, String description, Object handler, Method method,
-                      Class<?> senderType, List<ParameterDefinition> parameters) {
+                      Permission declaredNode, String description, boolean replaces, Object handler,
+                      Method method, Class<?> senderType, List<ParameterDefinition> parameters) {
         this.ownerId = ownerId;
         this.path = List.copyOf(path);
         this.permission = permission;
         this.permissionLevel = permissionLevel;
         this.declaredNode = declaredNode;
         this.description = description;
+        this.replaces = replaces;
         this.handler = handler;
         this.method = method;
         this.senderType = senderType;
@@ -99,6 +101,22 @@ public final class CommandDefinition {
 
     public String description() {
         return description;
+    }
+
+    /** {@code @Command(replaces = true)}: the root takes over from a command that is not CoffeeLib's. */
+    public boolean replaces() {
+        return replaces;
+    }
+
+    /** The {@code @OrSelf} "others" nodes of the arguments, to declare along with {@link #permission()}. */
+    public List<String> othersPermissions() {
+        List<String> nodes = new java.util.ArrayList<>();
+        for (ParameterDefinition parameter : parameters) {
+            if (parameter.isOrSelf() && !parameter.othersPermission().isEmpty()) {
+                nodes.add(parameter.othersPermission());
+            }
+        }
+        return nodes;
     }
 
     public List<ParameterDefinition> parameters() {
@@ -165,6 +183,10 @@ public final class CommandDefinition {
         for (int i = 0; i < parameters.size(); i++) {
             ParameterDefinition parameter = parameters.get(i);
             Object value = i < values.length ? values[i] : null;
+            if (value == null && parameter.isOrSelf()) {
+                arguments[i] = self(source, parameter);
+                continue;
+            }
             if (value == null) {
                 if (!parameter.isOptional()) {
                     throw new CommandException("Usage: " + usage());
@@ -173,7 +195,11 @@ public final class CommandDefinition {
             }
             // Strings are what the sender typed (or a @Default); anything else was already
             // parsed by the platform, such as an Integer from a Brigadier integer node.
-            arguments[i] = value instanceof String text ? parameter.parse(text) : value;
+            arguments[i] = value instanceof String text ? parameter.parse(source, text) : value;
+            if (parameter.isOrSelf() && arguments[i] != source.player() && !parameter.othersPermission().isEmpty()
+                    && !source.hasPermission(parameter.othersPermission())) {
+                throw new CommandException("You do not have permission to use this on other players.");
+            }
         }
 
         Object[] call;
@@ -185,6 +211,15 @@ public final class CommandDefinition {
             System.arraycopy(arguments, 0, call, 1, arguments.length);
         }
         return invoke(source, call);
+    }
+
+    /** An {@code @OrSelf} argument left out: the sender, who has to be a player then. */
+    private Object self(CommandSource source, ParameterDefinition parameter) {
+        Object player = source.player();
+        if (player == null || !parameter.type().isInstance(player)) {
+            throw new CommandException("Name a player: " + usage());
+        }
+        return player;
     }
 
     /**

@@ -7,7 +7,9 @@ import net.loyalnetwork.coffeelib.api.event.EventBus;
 import net.loyalnetwork.coffeelib.api.database.DatabaseManager;
 import net.loyalnetwork.coffeelib.api.economy.EconomyManager;
 import net.loyalnetwork.coffeelib.api.permission.PermissionManager;
+import net.loyalnetwork.coffeelib.api.player.PlayerDirectory;
 import net.loyalnetwork.coffeelib.api.scheduler.Scheduler;
+import net.loyalnetwork.coffeelib.core.player.SharedPlayers;
 import net.loyalnetwork.coffeelib.core.scheduler.TickSchedulers;
 import net.loyalnetwork.coffeelib.core.economy.SharedEconomy;
 import net.loyalnetwork.coffeelib.database.DefaultDatabaseManager;
@@ -236,6 +238,15 @@ public final class CoffeeLib {
     /** {@link Scheduler} for {@code modId}: the same one every call. */
     public static Scheduler scheduler(String modId) {
         return TickSchedulers.forOwner(modId);
+    }
+
+    /**
+     * Who can see whom, shared by every mod on CoffeeLib: a vanish mod
+     * registers its rule here, and every CoffeeLib command taking a player
+     * leaves hidden players out of completion and reads them as not found.
+     */
+    public static PlayerDirectory players() {
+        return SharedPlayers.directory();
     }
 
     /** {@link PermissionManager} for {@code modId}. */

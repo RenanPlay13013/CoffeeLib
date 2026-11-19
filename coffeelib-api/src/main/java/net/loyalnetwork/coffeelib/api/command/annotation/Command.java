@@ -55,4 +55,15 @@ public @interface Command {
 
     /** One line for usage messages and help. */
     String description() default "";
+
+    /**
+     * Takes the root's name over from a command that is not CoffeeLib's - the
+     * vanilla {@code /tp}, say - instead of merging with it. The other command
+     * is removed when this one is registered, and the replacement is logged.
+     * Another CoffeeLib owner's command is never replaced: two owners claiming
+     * one root this way fail at {@code register}. On a class, it applies to
+     * every method's root. Aliases of the replaced command, such as vanilla's
+     * {@code /teleport}, stay.
+     */
+    boolean replaces() default false;
 }

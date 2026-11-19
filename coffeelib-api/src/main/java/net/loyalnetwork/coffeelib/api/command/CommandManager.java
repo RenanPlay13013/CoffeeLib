@@ -21,4 +21,12 @@ public interface CommandManager {
 
     /** The root labels registered so far, e.g. {@code "crate"}. */
     Set<String> registeredRoots();
+
+    /**
+     * Lets this owner's handlers take {@code type} as an argument, read by
+     * {@code argument}. Call it before registering the handlers that use it.
+     * A type the platform already reads (a player, a dimension...) can be
+     * overridden this way, for this owner only.
+     */
+    <T> void argument(Class<T> type, CommandArgument<T> argument);
 }

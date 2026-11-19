@@ -1,21 +1,28 @@
 package net.loyalnetwork.coffeelib.paper.commands;
 
+import net.loyalnetwork.coffeelib.api.command.CommandArgument;
 import net.loyalnetwork.coffeelib.api.command.CommandManager;
 import net.loyalnetwork.coffeelib.api.exception.CoffeeLibException;
+import net.loyalnetwork.coffeelib.api.permission.PermissionDefault;
+import net.loyalnetwork.coffeelib.core.command.ArgumentTypes;
 import net.loyalnetwork.coffeelib.core.command.CommandDefinition;
+import net.loyalnetwork.coffeelib.core.command.CommandRoots;
 import net.loyalnetwork.coffeelib.core.command.CommandScanner;
 import net.loyalnetwork.coffeelib.core.command.TextCommandDispatcher;
 import net.loyalnetwork.coffeelib.paper.permission.PaperPermissionManager;
 import net.loyalnetwork.coffeelib.paper.scheduler.PaperScheduler;
 import org.bukkit.Server;
+import org.bukkit.command.Command;
 import org.bukkit.command.CommandMap;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -32,18 +39,21 @@ public final class PaperCommandManager implements CommandManager {
 
     private final JavaPlugin plugin;
     private final TextCommandDispatcher dispatcher;
+    private final ArgumentTypes types = ArgumentTypes.withDefaults();
     private final Set<String> registeredRoots = new HashSet<>();
 
     public PaperCommandManager(JavaPlugin plugin) {
         this.plugin = plugin;
         // An asynchronous command's late reply is sent from the main thread.
         this.dispatcher = new TextCommandDispatcher(new PaperScheduler(plugin).main());
+        PaperArguments.registerInto(types);
     }
 
     @Override
     public synchronized void register(Object handler) {
-        List<CommandDefinition> definitions = CommandScanner.scan(plugin.getName(), handler);
+        List<CommandDefinition> definitions = CommandScanner.scan(plugin.getName(), handler, types);
         dispatcher.addAll(definitions);
+        CommandRoots.claim(plugin.getName(), definitions);
 
         // Known to Bukkit - and so to LuckPerms' editor - with its @Permission default or the one
         // the op level implies.
@@ -52,11 +62,18 @@ public final class PaperCommandManager implements CommandManager {
                 PaperPermissionManager.declareCommandNode(plugin, definition.permission(),
                         definition.permissionDefault(), definition.permissionDescription());
             }
+            for (String others : definition.othersPermissions()) {
+                PaperPermissionManager.declareCommandNode(plugin, others, PermissionDefault.OPERATORS,
+                        definition.usage() + " on other players");
+            }
         }
 
         CommandMap commandMap = commandMap(plugin.getServer());
         String namespace = plugin.getName().toLowerCase(Locale.ROOT);
         for (CommandDefinition definition : definitions) {
+            if (CommandRoots.isReplaced(definition.root())) {
+                removeForeign(commandMap, definition.root());
+            }
             if (registeredRoots.add(definition.root())) {
                 commandMap.register(namespace,
                         new PaperCommand(definition.root(), plugin, dispatcher, definition.description()));
@@ -68,6 +85,50 @@ public final class PaperCommandManager implements CommandManager {
     @Override
     public synchronized Set<String> registeredRoots() {
         return Set.copyOf(registeredRoots);
+    }
+
+    @Override
+    public <T> void argument(Class<T> type, CommandArgument<T> argument) {
+        types.register(type, argument);
+    }
+
+    /**
+     * {@code @Command(replaces = true)}: takes the label from a command that is
+     * not CoffeeLib's - every key it is known by, namespaced ones included - so
+     * ours is registered under the plain label instead of a fallback.
+     */
+    private void removeForeign(CommandMap commandMap, String root) {
+        Map<String, Command> known = knownCommands(commandMap);
+        Command existing = known.get(root);
+        if (existing == null || existing instanceof PaperCommand) {
+            return;
+        }
+        known.values().removeIf(command -> command == existing);
+        existing.unregister(commandMap);
+        plugin.getLogger().info("Replaced the existing '/" + root + "' command");
+    }
+
+    /** The command map's label table: public from 1.13 on, a protected field before. */
+    @SuppressWarnings("unchecked")
+    private static Map<String, Command> knownCommands(CommandMap commandMap) {
+        try {
+            Method getter = commandMap.getClass().getMethod("getKnownCommands");
+            return (Map<String, Command>) getter.invoke(commandMap);
+        } catch (ReflectiveOperationException ignored) {
+            // An older server: read the field instead.
+        }
+        for (Class<?> type = commandMap.getClass(); type != null; type = type.getSuperclass()) {
+            try {
+                Field field = type.getDeclaredField("knownCommands");
+                field.setAccessible(true);
+                return (Map<String, Command>) field.get(commandMap);
+            } catch (NoSuchFieldException e) {
+                // Keep looking up the hierarchy.
+            } catch (IllegalAccessException e) {
+                break;
+            }
+        }
+        throw new CoffeeLibException("Could not reach the server's known commands to replace one");
     }
 
     /**

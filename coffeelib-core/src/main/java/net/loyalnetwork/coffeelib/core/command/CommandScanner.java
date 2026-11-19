@@ -1,10 +1,14 @@
 package net.loyalnetwork.coffeelib.core.command;
 
+import net.loyalnetwork.coffeelib.api.command.CommandArgument;
 import net.loyalnetwork.coffeelib.api.command.CommandSource;
+import net.loyalnetwork.coffeelib.api.command.SuggestContext;
 import net.loyalnetwork.coffeelib.api.command.annotation.Arg;
 import net.loyalnetwork.coffeelib.api.command.annotation.Command;
 import net.loyalnetwork.coffeelib.api.command.annotation.Default;
 import net.loyalnetwork.coffeelib.api.command.annotation.Greedy;
+import net.loyalnetwork.coffeelib.api.command.annotation.OrSelf;
+import net.loyalnetwork.coffeelib.api.command.annotation.Registry;
 import net.loyalnetwork.coffeelib.api.command.annotation.Suggest;
 import net.loyalnetwork.coffeelib.api.exception.CoffeeLibException;
 import net.loyalnetwork.coffeelib.api.permission.annotation.Permission;
@@ -20,7 +24,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
-import java.util.function.Function;
 
 /**
  * Reads a handler object's {@code @Command} methods into
@@ -40,11 +43,17 @@ public final class CommandScanner {
     private CommandScanner() {
     }
 
+    /** {@link #scan(String, Object, ArgumentTypes)} with only the core's argument types. */
+    public static List<CommandDefinition> scan(String ownerId, Object handler) {
+        return scan(ownerId, handler, ArgumentTypes.withDefaults());
+    }
+
     /**
      * @param ownerId the mod or plugin the commands belong to, for log lines
+     * @param types   the argument types beyond the built-in ones: the platform's and the owner's
      * @throws CoffeeLibException naming the method when the handler is wrong
      */
-    public static List<CommandDefinition> scan(String ownerId, Object handler) {
+    public static List<CommandDefinition> scan(String ownerId, Object handler, ArgumentTypes types) {
         Class<?> type = handler.getClass();
         Command group = type.getAnnotation(Command.class);
         List<List<String>> prefixes = group == null ? List.of(List.of()) : paths(group, type.getName());
@@ -74,9 +83,10 @@ public final class CommandScanner {
             }
 
             Parameter[] parameters = method.getParameters();
-            Class<?> senderType = parameters.length > 0 && isSender(parameters[0].getType())
-                    ? parameters[0].getType() : null;
-            List<ParameterDefinition> arguments = arguments(handler, where, parameters, senderType != null ? 1 : 0);
+            Class<?> senderType = parameters.length > 0 && isSender(parameters[0]) ? parameters[0].getType() : null;
+            List<ParameterDefinition> arguments = arguments(handler, where, parameters, senderType != null ? 1 : 0,
+                    types);
+            boolean replaces = command.replaces() || (group != null && group.replaces());
 
             for (List<String> prefix : prefixes) {
                 for (List<String> own : paths(command, where)) {
@@ -87,7 +97,7 @@ public final class CommandScanner {
                                 + " has an empty path and its class has no @Command prefix");
                     }
                     definitions.add(new CommandDefinition(ownerId, path, permission, level, node,
-                            command.description(), handler, method, senderType, arguments));
+                            command.description(), replaces, handler, method, senderType, arguments));
                 }
             }
         }
@@ -131,14 +141,25 @@ public final class CommandScanner {
     /**
      * The first parameter is the sender when it is not something an argument
      * could be - a {@code CommandSource}, or a platform type such as a player.
-     * A {@code String} first parameter is an argument, never the sender.
+     * A {@code String} first parameter is an argument, never the sender, and
+     * so is any first parameter annotated as one ({@code @Arg}, {@code @OrSelf}...):
+     * {@code god(@OrSelf ServerPlayer target)} takes a target, not a sender.
      */
-    private static boolean isSender(Class<?> type) {
-        return CommandSource.class.isAssignableFrom(type) || kindOf(type) == null;
+    private static boolean isSender(Parameter parameter) {
+        if (CommandSource.class.isAssignableFrom(parameter.getType())) {
+            return true;
+        }
+        for (Class<? extends java.lang.annotation.Annotation> marker : List.of(Arg.class, OrSelf.class,
+                Default.class, Suggest.class, Greedy.class, Registry.class)) {
+            if (parameter.isAnnotationPresent(marker)) {
+                return false;
+            }
+        }
+        return kindOf(parameter.getType()) == null;
     }
 
     private static List<ParameterDefinition> arguments(Object handler, String where, Parameter[] parameters,
-                                                        int first) {
+                                                        int first, ArgumentTypes types) {
         List<ParameterDefinition> arguments = new ArrayList<>();
         Set<String> names = new HashSet<>();
         boolean optionalSeen = false;
@@ -149,10 +170,27 @@ public final class CommandScanner {
             String context = "argument <" + name + "> of " + where;
 
             ArgumentKind kind = kindOf(parameter.getType());
+            CommandArgument<?> custom = null;
             if (kind == null) {
-                throw new CoffeeLibException("Unsupported type " + parameter.getType().getSimpleName() + " for "
-                        + context + ". Supported: String, int, long, double, float, boolean (and their wrappers), "
-                        + "enums. Only the first parameter may be a sender type.");
+                custom = types.find(parameter);
+                if (custom == null) {
+                    throw new CoffeeLibException("Unsupported type " + parameter.getType().getSimpleName() + " for "
+                            + context + ". Supported: String, int, long, double, float, boolean (and their wrappers), "
+                            + "enums, " + types.names() + ", and types given to CommandManager.argument(...). "
+                            + "Only the first parameter may be a sender type.");
+                }
+                kind = ArgumentKind.CUSTOM;
+            }
+
+            OrSelf orSelf = parameter.getAnnotation(OrSelf.class);
+            if (orSelf != null) {
+                if (!types.isPlayer(parameter.getType())) {
+                    throw new CoffeeLibException("@OrSelf only applies to this platform's player type, not to "
+                            + context);
+                }
+                if (parameter.isAnnotationPresent(Default.class)) {
+                    throw new CoffeeLibException("@OrSelf " + context + " is already optional; remove its @Default");
+                }
             }
 
             if (parameter.isAnnotationPresent(Greedy.class)) {
@@ -166,7 +204,7 @@ public final class CommandScanner {
             }
 
             Default fallback = parameter.getAnnotation(Default.class);
-            if (fallback != null) {
+            if (fallback != null || orSelf != null) {
                 optionalSeen = true;
             } else if (optionalSeen) {
                 throw new CoffeeLibException("Required " + context + " comes after an optional one; "
@@ -179,9 +217,11 @@ public final class CommandScanner {
             }
 
             ParameterDefinition definition = new ParameterDefinition(name, parameter.getType(), kind,
-                    fallback != null ? fallback.value() : null, suggestions(handler, parameter, context));
-            if (fallback != null) {
-                // Fail at registration, not on the first run that leaves it out.
+                    fallback != null ? fallback.value() : null, suggestions(handler, parameter, context), custom,
+                    orSelf != null ? orSelf.others() : null);
+            if (fallback != null && kind != ArgumentKind.CUSTOM) {
+                // Fail at registration, not on the first run that leaves it out. A custom type may need
+                // the sender or the server to parse, so its default is only parsed when it is used.
                 definition.parse(fallback.value());
             }
             arguments.add(definition);
@@ -224,26 +264,49 @@ public final class CommandScanner {
     }
 
     @SuppressWarnings("unchecked")
-    private static Function<CommandSource, Collection<String>> suggestions(Object handler, Parameter parameter,
-                                                                           String context) {
+    private static ParameterDefinition.Suggester suggestions(Object handler, Parameter parameter, String context) {
         Suggest suggest = parameter.getAnnotation(Suggest.class);
         if (suggest == null) {
             return null;
         }
         if (suggest.provider().isEmpty()) {
             List<String> values = Arrays.asList(suggest.value());
-            return source -> values;
+            return new ParameterDefinition.Suggester() {
+                @Override
+                public Collection<String> suggest(SuggestContext suggestContext) {
+                    return values;
+                }
+
+                @Override
+                public boolean byToken() {
+                    return false;
+                }
+            };
         }
 
         Method provider = findProvider(handler.getClass(), suggest.provider(), context);
         provider.setAccessible(true);
-        boolean takesSource = provider.getParameterCount() == 1;
-        return source -> {
-            try {
-                return (Collection<String>) (takesSource ? provider.invoke(handler, source) : provider.invoke(handler));
-            } catch (IllegalAccessException | InvocationTargetException e) {
-                // A broken provider costs the sender suggestions, not the command.
-                return List.of();
+        Class<?> takes = provider.getParameterCount() == 1 ? provider.getParameterTypes()[0] : null;
+        // CommandSource first, so a provider taking Object keeps the old meaning.
+        boolean takesSource = takes != null && takes.isAssignableFrom(CommandSource.class);
+        boolean takesContext = takes != null && !takesSource;
+        return new ParameterDefinition.Suggester() {
+            @Override
+            public Collection<String> suggest(SuggestContext suggestContext) {
+                try {
+                    Object result = takesContext ? provider.invoke(handler, suggestContext)
+                            : takesSource ? provider.invoke(handler, suggestContext.source())
+                            : provider.invoke(handler);
+                    return (Collection<String>) result;
+                } catch (IllegalAccessException | InvocationTargetException e) {
+                    // A broken provider costs the sender suggestions, not the command.
+                    return List.of();
+                }
+            }
+
+            @Override
+            public boolean byToken() {
+                return takesContext;
             }
         };
     }
@@ -256,12 +319,15 @@ public final class CommandScanner {
             if (method.getParameterCount() == 0) {
                 return method;
             }
-            if (method.getParameterCount() == 1 && method.getParameterTypes()[0].isAssignableFrom(CommandSource.class)) {
-                return method;
+            if (method.getParameterCount() == 1) {
+                Class<?> takes = method.getParameterTypes()[0];
+                if (takes.isAssignableFrom(CommandSource.class) || takes.isAssignableFrom(SuggestContext.class)) {
+                    return method;
+                }
             }
         }
         throw new CoffeeLibException("@Suggest(provider = \"" + name + "\") on " + context + " names no method "
-                + "returning a Collection<String> that takes nothing or a CommandSource");
+                + "returning a Collection<String> that takes nothing, a CommandSource or a SuggestContext");
     }
 
     /**

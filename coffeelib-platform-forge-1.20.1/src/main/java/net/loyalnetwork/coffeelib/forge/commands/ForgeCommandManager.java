@@ -2,6 +2,10 @@ package net.loyalnetwork.coffeelib.forge.commands;
 
 import net.loyalnetwork.coffeelib.api.command.CommandManager;
 import net.loyalnetwork.coffeelib.core.command.CommandDefinition;
+import net.loyalnetwork.coffeelib.api.command.CommandArgument;
+import net.loyalnetwork.coffeelib.api.permission.PermissionDefault;
+import net.loyalnetwork.coffeelib.core.command.ArgumentTypes;
+import net.loyalnetwork.coffeelib.core.command.CommandRoots;
 import net.loyalnetwork.coffeelib.core.command.CommandScanner;
 import net.loyalnetwork.coffeelib.core.command.TextCommandDispatcher;
 import net.loyalnetwork.coffeelib.core.permission.SharedPermissions;
@@ -34,17 +38,24 @@ public final class ForgeCommandManager implements CommandManager {
     private final String ownerId;
     private final List<ForgeCommandRegistration> registrations = new CopyOnWriteArrayList<>();
     private final TextCommandDispatcher paths = new TextCommandDispatcher();
+    private final ArgumentTypes types = ArgumentTypes.withDefaults();
 
     public ForgeCommandManager(String ownerId) {
         this.ownerId = ownerId;
+        ForgeArguments.registerInto(types);
         MinecraftForge.EVENT_BUS.addListener(this::onRegisterCommands);
     }
 
     @Override
     public void register(Object handler) {
-        List<CommandDefinition> definitions = CommandScanner.scan(ownerId, handler);
-        // Duplicate paths are refused here, across this mod's handlers.
+        List<CommandDefinition> definitions = CommandScanner.scan(ownerId, handler, types);
+        // Compiled once now so a tree Brigadier cannot build fails here, not at server start.
+        for (CommandDefinition definition : definitions) {
+            ForgeCommandCompiler.compile(definition);
+        }
+        // Duplicate paths are refused here, across this mod's handlers; roots across every owner.
         paths.addAll(definitions);
+        CommandRoots.claim(ownerId, definitions);
 
         // A command's node is known to the permission system - and so to LuckPerms' editor -
         // with its @Permission default or the one its op level implies, unless its owner
@@ -54,6 +65,10 @@ public final class ForgeCommandManager implements CommandManager {
                 SharedPermissions.nodes().declareIfAbsent(ownerId, definition.permission(),
                         definition.permissionDefault(), Math.max(definition.permissionLevel(), 0),
                         definition.permissionDescription());
+            }
+            for (String others : definition.othersPermissions()) {
+                SharedPermissions.nodes().declareIfAbsent(ownerId, others, PermissionDefault.OPERATORS,
+                        Math.max(definition.permissionLevel(), 2), definition.usage() + " on other players");
             }
         }
 
@@ -74,6 +89,11 @@ public final class ForgeCommandManager implements CommandManager {
     @Override
     public Set<String> registeredRoots() {
         return Set.copyOf(paths.roots());
+    }
+
+    @Override
+    public <T> void argument(Class<T> type, CommandArgument<T> argument) {
+        types.register(type, argument);
     }
 
     private void onRegisterCommands(RegisterCommandsEvent event) {

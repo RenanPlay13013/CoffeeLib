@@ -66,14 +66,7 @@ public final class TextCommandDispatcher {
         }
 
         List<String> rest = tokens.subList(match.path().size(), tokens.size());
-        List<ParameterDefinition> parameters = match.parameters();
-        List<String> arguments = new ArrayList<>(rest);
-        if (!parameters.isEmpty() && parameters.get(parameters.size() - 1).kind() == ArgumentKind.GREEDY
-                && rest.size() > parameters.size()) {
-            int greedyAt = parameters.size() - 1;
-            arguments = new ArrayList<>(rest.subList(0, greedyAt));
-            arguments.add(String.join(" ", rest.subList(greedyAt, rest.size())));
-        }
+        List<String> arguments = split(match.parameters(), rest);
 
         try {
             CompletionStage<?> pending = match.execute(source, arguments);
@@ -117,19 +110,72 @@ public final class TextCommandDispatcher {
                 continue;
             }
 
-            int argumentIndex = position - path.size();
-            List<ParameterDefinition> parameters = definition.parameters();
-            if (parameters.isEmpty()) {
-                continue;
-            }
-            ParameterDefinition last = parameters.get(parameters.size() - 1);
-            ParameterDefinition parameter = argumentIndex < parameters.size() ? parameters.get(argumentIndex)
-                    : last.kind() == ArgumentKind.GREEDY ? last : null;
-            if (parameter != null) {
-                completions.addAll(parameter.suggest(source, partial));
-            }
+            completions.addAll(completeArgument(source, definition, typed.subList(path.size(), typed.size()),
+                    partial));
         }
         return new ArrayList<>(completions);
+    }
+
+    /**
+     * Completions for the argument word being typed, given the argument words
+     * before it - which say which parameter it belongs to, since one may take
+     * several words or the rest of the line.
+     */
+    private static List<String> completeArgument(CommandSource source, CommandDefinition definition,
+                                                 List<String> before, String partial) {
+        List<ParameterDefinition> parameters = definition.parameters();
+        int word = before.size();
+        int start = 0;
+        for (int i = 0; i < parameters.size(); i++) {
+            ParameterDefinition parameter = parameters.get(i);
+            int length = parameter.kind() == ArgumentKind.GREEDY ? Integer.MAX_VALUE : parameter.words();
+            if (word - start < length) {
+                List<String> own = new ArrayList<>(before.subList(start, word));
+                own.add(partial);
+                List<String> earlier = split(parameters.subList(0, i), before.subList(0, start));
+                DefaultSuggestContext context = new DefaultSuggestContext(source, String.join(" ", own),
+                        name -> parsedEarlier(source, parameters, earlier, name));
+                // Bukkit replaces only the last word, so every suggestion stands for the token.
+                return parameter.suggest(context, true);
+            }
+            start += length;
+        }
+        return List.of();
+    }
+
+    /** An earlier argument, parsed, for {@code SuggestContext#previous}. */
+    private static Object parsedEarlier(CommandSource source, List<ParameterDefinition> parameters,
+                                        List<String> earlier, String name) {
+        for (int i = 0; i < earlier.size() && i < parameters.size(); i++) {
+            if (parameters.get(i).name().equals(name)) {
+                return parameters.get(i).parse(source, earlier.get(i));
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The words after a command's path as one string per argument: a
+     * multi-word argument's words joined, a greedy one taking the rest. Words
+     * left over are kept, one each, for the usage error they cause.
+     */
+    static List<String> split(List<ParameterDefinition> parameters, List<String> words) {
+        List<String> arguments = new ArrayList<>();
+        int at = 0;
+        for (ParameterDefinition parameter : parameters) {
+            if (at >= words.size()) {
+                return arguments;
+            }
+            if (parameter.kind() == ArgumentKind.GREEDY) {
+                arguments.add(String.join(" ", words.subList(at, words.size())));
+                return arguments;
+            }
+            int end = Math.min(words.size(), at + parameter.words());
+            arguments.add(String.join(" ", words.subList(at, end)));
+            at = end;
+        }
+        arguments.addAll(words.subList(at, words.size()));
+        return arguments;
     }
 
     /** The root labels known here - what a platform registers as top-level commands. */
