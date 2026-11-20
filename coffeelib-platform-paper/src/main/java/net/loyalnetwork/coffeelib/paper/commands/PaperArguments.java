@@ -32,12 +32,13 @@ final class PaperArguments {
         types.register(Location.class, new LocationArgument());
     }
 
-    /** CoffeeLib's visibility rules and Bukkit's own {@code canSee}, both. */
+    /**
+     * The shared directory already checks Bukkit's native visibility predicate.
+     * Do not call Player.canSee a second time here: the shared directory
+     * handles platform exceptions by denying access rather than exposing names.
+     */
     static boolean visible(Object viewer, Player target) {
-        if (!SharedPlayers.directory().canSee(viewer, target)) {
-            return false;
-        }
-        return !(viewer instanceof Player player) || player == target || player.canSee(target);
+        return SharedPlayers.directory().canSee(viewer, target);
     }
 
     /** An online player by exact name, among those the sender may see. */

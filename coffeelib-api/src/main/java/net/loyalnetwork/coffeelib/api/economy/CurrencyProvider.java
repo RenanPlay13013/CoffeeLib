@@ -17,6 +17,9 @@ import java.util.concurrent.CompletableFuture;
  * Every method returns a future, completed whenever the provider has the
  * answer - immediately for accounts held in memory, later for a database.
  * Calls can come from any thread, so a provider must be safe for that.
+ * Providers capable of a database-atomic transfer should additionally implement
+ * {@link AtomicTransferProvider}; otherwise {@link Currency#transfer} returns
+ * {@link TransactionResult.Status#NOT_SUPPORTED} without debiting anyone.
  * Registered through {@code EconomyManager#register}; consumers reach it
  * through {@link Currency}, never directly.
  */

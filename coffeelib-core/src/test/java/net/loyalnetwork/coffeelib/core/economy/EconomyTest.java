@@ -1,5 +1,6 @@
 package net.loyalnetwork.coffeelib.core.economy;
 
+import net.loyalnetwork.coffeelib.api.economy.AtomicTransferProvider;
 import net.loyalnetwork.coffeelib.api.economy.Currency;
 import net.loyalnetwork.coffeelib.api.economy.CurrencyProvider;
 import net.loyalnetwork.coffeelib.api.economy.EconomyManager;
@@ -31,7 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class EconomyTest {
 
     /** A provider keeping balances in a map, with whole units and an optional broken deposit. */
-    static class MapProvider implements CurrencyProvider {
+    static class MapProvider implements AtomicTransferProvider {
         final String id;
         final int digits;
         final Map<UUID, BigDecimal> accounts = new ConcurrentHashMap<>();
@@ -54,12 +55,12 @@ class EconomyTest {
         }
 
         @Override
-        public CompletableFuture<BigDecimal> balance(UUID account) {
+        public synchronized CompletableFuture<BigDecimal> balance(UUID account) {
             return CompletableFuture.completedFuture(accounts.getOrDefault(account, BigDecimal.ZERO));
         }
 
         @Override
-        public CompletableFuture<TransactionResult> deposit(UUID account, BigDecimal amount) {
+        public synchronized CompletableFuture<TransactionResult> deposit(UUID account, BigDecimal amount) {
             seen.add(amount);
             if (account.equals(refuseDepositsTo)) {
                 return CompletableFuture.completedFuture(TransactionResult.failure(Status.NO_ACCOUNT, "closed account"));
@@ -68,7 +69,7 @@ class EconomyTest {
         }
 
         @Override
-        public CompletableFuture<TransactionResult> withdraw(UUID account, BigDecimal amount) {
+        public synchronized CompletableFuture<TransactionResult> withdraw(UUID account, BigDecimal amount) {
             seen.add(amount);
             BigDecimal balance = accounts.getOrDefault(account, BigDecimal.ZERO);
             if (balance.compareTo(amount) < 0) {
@@ -76,6 +77,24 @@ class EconomyTest {
             }
             BigDecimal left = balance.subtract(amount);
             accounts.put(account, left);
+            return CompletableFuture.completedFuture(TransactionResult.success(left));
+        }
+
+        @Override
+        public synchronized CompletableFuture<TransactionResult> transfer(UUID from, UUID to, BigDecimal amount) {
+            // This test provider holds both account mutations under the same
+            // lock. Real providers must do the equivalent in one DB transaction.
+            seen.add(amount);
+            if (to.equals(refuseDepositsTo)) {
+                return CompletableFuture.completedFuture(TransactionResult.failure(Status.NO_ACCOUNT, "closed account"));
+            }
+            BigDecimal balance = accounts.getOrDefault(from, BigDecimal.ZERO);
+            if (balance.compareTo(amount) < 0) {
+                return CompletableFuture.completedFuture(TransactionResult.failure(Status.INSUFFICIENT_FUNDS, "too poor"));
+            }
+            BigDecimal left = balance.subtract(amount);
+            accounts.put(from, left);
+            accounts.merge(to, amount, BigDecimal::add);
             return CompletableFuture.completedFuture(TransactionResult.success(left));
         }
     }
@@ -158,7 +177,7 @@ class EconomyTest {
     }
 
     @Test
-    void aTransferMovesTheAmountOrGivesItBack() {
+    void anAtomicTransferMovesBothBalancesOrNeither() {
         MapProvider coins = new MapProvider("coins", 0);
         essentials.register(coins);
         Currency handle = shopMod.currency("coins");
@@ -173,17 +192,18 @@ class EconomyTest {
         coins.refuseDepositsTo = alex;
         TransactionResult refused = handle.transfer(steve, alex, new BigDecimal("10")).join();
         assertEquals(Status.NO_ACCOUNT, refused.status(), "the deposit's failure is the transfer's");
-        assertEquals(new BigDecimal("60"), coins.accounts.get(steve), "the withdrawn amount came back");
+        assertEquals(new BigDecimal("60"), coins.accounts.get(steve), "failed transfers do not debit either account");
+        assertEquals(new BigDecimal("40"), coins.accounts.get(alex));
     }
 
     @Test
-    void aFailedRefundIsNotReportedAsAnOrdinaryRecipientError() {
+    void providerWithoutAtomicTransferIsRejectedWithoutAnyDebit() {
         MapProvider coins = new MapProvider("coins", 0);
         essentials.register(coins);
         Currency handle = shopMod.currency("coins");
         handle.deposit(steve, new BigDecimal("100")).join();
-        // Refuse both the target deposit and the attempted refund after withdrawal.
-        // The recipient deposit and the refund both fail after the withdrawal.
+        // A legacy provider can withdraw money without guaranteeing the recipient
+        // deposit or compensation. Reject before either callback runs.
         CurrencyProvider failingRefund = new CurrencyProvider() {
             public String id() { return "coins"; }
             public int fractionalDigits() { return 0; }
@@ -198,9 +218,70 @@ class EconomyTest {
         essentials.register(failingRefund); // same owner may replace its provider
 
         TransactionResult result = handle.transfer(steve, alex, BigDecimal.TEN).join();
-        assertEquals(Status.FAILED, result.status());
-        assertTrue(result.message().contains("manual reconciliation"));
-        assertEquals(new BigDecimal("90"), coins.accounts.get(steve));
+        assertEquals(Status.NOT_SUPPORTED, result.status());
+        assertTrue(result.message().contains("atomic"));
+        assertEquals(new BigDecimal("100"), coins.accounts.get(steve));
+        assertEquals(BigDecimal.ZERO, coins.accounts.getOrDefault(alex, BigDecimal.ZERO));
+    }
+
+    @Test
+    void atomicTransferRejectsInvalidAmountsWithoutDispatching() {
+        MapProvider provider = new MapProvider("coins", 0);
+        essentials.register(provider);
+        Currency handle = shopMod.currency("coins");
+
+        assertEquals(Status.INVALID_AMOUNT, handle.transfer(steve, steve, BigDecimal.ONE).join().status());
+        assertEquals(Status.INVALID_AMOUNT, handle.transfer(steve, alex, BigDecimal.ZERO).join().status());
+        assertEquals(Status.INVALID_AMOUNT, handle.transfer(steve, alex, new BigDecimal("1.5")).join().status());
+        assertTrue(provider.seen.isEmpty(), "invalid transfers must never reach the provider");
+    }
+
+    @Test
+    void providerExceptionOrNullResultFailsWithoutCompensatingOperations() {
+        MapProvider accounts = new MapProvider("coins", 0);
+        essentials.register(accounts);
+        accounts.deposit(steve, BigDecimal.TEN).join();
+        java.util.concurrent.atomic.AtomicInteger transferCalls = new java.util.concurrent.atomic.AtomicInteger();
+        AtomicTransferProvider broken = new AtomicTransferProvider() {
+            public String id() { return "coins"; }
+            public int fractionalDigits() { return 0; }
+            public CompletableFuture<BigDecimal> balance(UUID account) { return accounts.balance(account); }
+            public CompletableFuture<TransactionResult> deposit(UUID account, BigDecimal amount) {
+                throw new AssertionError("The library must never attempt compensation");
+            }
+            public CompletableFuture<TransactionResult> withdraw(UUID account, BigDecimal amount) {
+                throw new AssertionError("The library must never attempt a standalone debit");
+            }
+            public CompletableFuture<TransactionResult> transfer(UUID from, UUID to, BigDecimal amount) {
+                return switch (transferCalls.incrementAndGet()) {
+                    case 1 -> CompletableFuture.failedFuture(new IllegalStateException("database error"));
+                    default -> CompletableFuture.completedFuture(null);
+                };
+            }
+        };
+        essentials.register(broken);
+        Currency handle = shopMod.currency("coins");
+        assertEquals(Status.FAILED, handle.transfer(steve, alex, BigDecimal.ONE).join().status());
+        assertEquals(Status.FAILED, handle.transfer(steve, alex, BigDecimal.ONE).join().status());
+        assertEquals(2, transferCalls.get());
+        assertEquals(BigDecimal.TEN, accounts.accounts.get(steve));
+    }
+
+    @Test
+    void concurrentTransfersMaintainTheTotalWithARealAtomicProvider() {
+        MapProvider accounts = new MapProvider("coins", 0);
+        essentials.register(accounts);
+        accounts.deposit(steve, new BigDecimal("100")).join();
+        Currency handle = shopMod.currency("coins");
+
+        CompletableFuture<?>[] operations = new CompletableFuture<?>[60];
+        for (int i = 0; i < operations.length; i++) {
+            operations[i] = CompletableFuture.supplyAsync(() -> handle.transfer(steve, alex, BigDecimal.ONE).join())
+                    .thenAccept(result -> assertTrue(result.succeeded()));
+        }
+        CompletableFuture.allOf(operations).join();
+        assertEquals(new BigDecimal("40"), accounts.accounts.get(steve));
+        assertEquals(new BigDecimal("60"), accounts.accounts.get(alex));
     }
 
     @Test

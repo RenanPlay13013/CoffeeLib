@@ -749,8 +749,11 @@ List<Object> visible = players.visibleTo(viewer);
 ```
 
 `visibleTo` devolve uma lista imutável dos jogadores online visíveis, somando
-as regras da CoffeeLib e, no Paper, o `Player.canSee` nativo. Console (viewer
-null) vê todos; jogador vê a si mesmo. Consulte o diretório **na thread do
+as regras da CoffeeLib e, no Paper, o `Player.canSee` nativo. **A verificação
+falha de forma segura:** se uma regra ou verificação nativa lança exceção, o
+jogador afetado fica oculto para quem consulta; a primeira falha de cada regra
+é registrada no log com o contexto do dono, sem revelar jogadores ocultos.
+Console (`viewer` null) vê todos; jogador vê a si mesmo. Consulte o diretório **na thread do
 servidor**, pois ele trabalha com jogadores reais. A forma anterior
 `visibility(rule)` continua válida, mas quem a usa deve cancelar o
 `EventSubscription` manualmente. No Forge/NeoForge, como o mod não é
@@ -973,12 +976,22 @@ coins.transfer(pagador, recebedor, valor);                           // /pay
 * **Tudo é assíncrono**: um provedor com banco de dados nunca trava o servidor,
   e um em memória completa na hora. Os futures completam na thread do provedor;
   volte para a thread do servidor antes de mexer no mundo.
-* **`transfer` é um saque seguido de um depósito**; se o depósito do
-  destinatário falhar, a CoffeeLib tenta estornar. Se o estorno também falhar,
-  registra o erro e devolve `FAILED` com aviso de conciliação manual, em vez de
-  ocultar o risco num erro comum do destinatário. **Não é atômica:** uma queda
-  do servidor ou falha no banco ainda pode perder dinheiro entre as etapas.
-  Transferências que exigem atomicidade precisam de um provedor transacional.
+* **`transfer` agora exige um `AtomicTransferProvider`.** Essa extensão
+  opcional executa débito e crédito **dentro de uma única transação do provedor**.
+  A CoffeeLib valida o valor e invoca o mesmo provedor uma única vez, sem
+  realizar `withdraw` e `deposit` separadamente. Sem essa capacidade, devolve
+  `NOT_SUPPORTED` **sem movimentar dinheiro**. É uma mudança intencional de
+  comportamento em relação ao fluxo inseguro de saque/depósito/estorno.
+  Provedores existentes precisam implementar explicitamente a interface para
+  continuar oferecendo `/pay`.
+* **Contrato do provedor:** bloqueie as duas contas em ordem determinística
+  (ou use transação ACID no banco), valide saldo e destinatário, modifique as
+  duas contas e confirme ou desfaça as duas alterações juntas. As demais
+  operações sobre essas contas também precisam usar sincronização compatível.
+  Nunca construa uma transferência atômica encadeando dois futures. O Vault
+  importado não tem garantia transacional e retorna `NOT_SUPPORTED`.
+  Mesmo com armazenamento atômico, uma falha de rede após o commit pode gerar
+  resposta ambígua; novas tentativas exigem chaves de idempotência.
 * Um provedor é um objeto comum chamado de qualquer thread: ele precisa ser
   thread-safe. No Paper, as moedas de um plugin saem quando ele é desabilitado.
 

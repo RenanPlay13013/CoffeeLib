@@ -15,8 +15,10 @@ import java.util.List;
  * CoffeeLib.players().visibility((viewer, target) ->
  *         !Vanish.isVanished((ServerPlayer) target) || permissions.has(viewer, "vanish.see"));
  * }</pre>
- * Every rule must allow it for a player to be visible. A rule that throws is
- * logged and counts as allowing, so a bug in one mod hides no one.
+ * Every rule must allow it for a player to be visible. If a rule (or the
+ * native visibility check) throws, CoffeeLib logs the first failure and
+ * **denies** that visibility query rather than revealing a hidden player.
+ * Console and self-visibility retain their documented bypass behavior.
  */
 public interface PlayerDirectory {
 
@@ -53,6 +55,8 @@ public interface PlayerDirectory {
     /**
      * Whether {@code viewer} may see {@code target}. A {@code null} viewer is
      * the console, which sees everyone; so does a player looking at themselves.
+     * A failing visibility rule or platform check is treated as a denial.
+     * Call on the platform's server thread.
      */
     boolean canSee(Object viewer, Object target);
 }

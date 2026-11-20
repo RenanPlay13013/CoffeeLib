@@ -9,6 +9,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiPredicate;
 import java.util.function.Supplier;
 import java.util.logging.Level;
@@ -27,6 +28,7 @@ public final class SharedPlayers implements PlayerDirectory {
     private final List<Rule> rules = new CopyOnWriteArrayList<>();
     private volatile Supplier<? extends Collection<?>> onlinePlayers;
     private volatile BiPredicate<Object, Object> platformVisibility = (viewer, target) -> true;
+    private final AtomicBoolean nativeFailureLogged = new AtomicBoolean();
 
     private SharedPlayers() {
     }
@@ -44,6 +46,7 @@ public final class SharedPlayers implements PlayerDirectory {
                                               BiPredicate<Object, Object> nativeVisibility) {
         DIRECTORY.onlinePlayers = Objects.requireNonNull(online, "online");
         DIRECTORY.platformVisibility = Objects.requireNonNull(nativeVisibility, "nativeVisibility");
+        DIRECTORY.nativeFailureLogged.set(false);
     }
 
     @Override
@@ -80,8 +83,16 @@ public final class SharedPlayers implements PlayerDirectory {
         if (viewer == null || viewer == target) {
             return true;
         }
-        // Native hide/show (Paper) and CoffeeLib rules are cumulative.
-        if (!platformVisibility.test(viewer, target)) {
+        // Privacy-sensitive queries must fail closed. Otherwise an exception in
+        // a vanish provider exposes hidden players in autocomplete and commands.
+        try {
+            if (!platformVisibility.test(viewer, target)) {
+                return false;
+            }
+        } catch (RuntimeException e) {
+            if (nativeFailureLogged.compareAndSet(false, true)) {
+                LOGGER.log(Level.SEVERE, "[CoffeeLib] Native player visibility check failed; hiding affected players", e);
+            }
             return false;
         }
         for (Rule rule : rules) {
@@ -90,8 +101,11 @@ public final class SharedPlayers implements PlayerDirectory {
                     return false;
                 }
             } catch (RuntimeException e) {
-                // A broken rule hides no one, consistent with the original contract.
-                LOGGER.log(Level.SEVERE, "[CoffeeLib] A player visibility rule failed; treating the player as visible", e);
+                if (rule.failureLogged.compareAndSet(false, true)) {
+                    LOGGER.log(Level.SEVERE, "[CoffeeLib] Visibility rule for owner '"
+                            + rule.owner + "' failed; hiding affected players", e);
+                }
+                return false;
             }
         }
         return true;
@@ -116,6 +130,7 @@ public final class SharedPlayers implements PlayerDirectory {
     private final class Rule implements EventSubscription {
         final String owner;
         final PlayerVisibility visibility;
+        final AtomicBoolean failureLogged = new AtomicBoolean();
 
         Rule(String owner, PlayerVisibility visibility) {
             this.owner = owner;

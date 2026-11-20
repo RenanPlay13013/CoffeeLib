@@ -743,8 +743,11 @@ List<Object> visible = players.visibleTo(viewer);
 ```
 
 `visibleTo` is a snapshot of currently online players, filtered by every
-CoffeeLib rule; on Paper it also honors Bukkit `Player.canSee`. A null viewer
-(console) sees all, and a player always sees themselves. Query live online
+CoffeeLib rule; on Paper it also honors Bukkit `Player.canSee`. **Visibility
+checks fail closed:** if a rule or the native check throws, the affected player
+is hidden from that viewer; the first exception per rule is logged with owner
+context rather than leaking hidden names. A null viewer (console) sees all,
+and a player always sees themselves. Query live online
 players and visibility **only on the server thread**. When an owner id is not
 supplied, existing `visibility(rule)` remains supported but its returned
 subscription **must** be unsubscribed manually. On Forge/NeoForge, release
@@ -967,12 +970,22 @@ coins.transfer(payer, payee, amount);                                // /pay
 * **Everything is asynchronous**: a provider on a database never blocks the
   server, and one in memory completes at once. Futures complete on the
   provider's thread - go back to the server thread before touching the world.
-* **`transfer` is a withdrawal then a deposit**; if the recipient deposit
-  fails, CoffeeLib attempts a refund. A failed refund is logged and reported as
-  `FAILED` with a manual-reconciliation warning, not disguised as an ordinary
-  recipient failure. **This is not atomic:** a crash or database outage can
-  still lose money between operations. Use a transactional provider if
-  transfers must be atomic.
+* **`transfer` now requires an `AtomicTransferProvider`.** This opt-in
+  extension performs the debit and credit **inside one transaction owned by the
+  provider**. The CoffeeLib handle validates the amount and makes one call to
+  the same provider instance; it does not call `withdraw` or `deposit` itself.
+  If the provider is not atomic, `transfer` returns `NOT_SUPPORTED` **without
+  moving any money**. This is a deliberate fail-closed behavior change from
+  the earlier unsafe withdraw/deposit/refund sequence. An existing provider
+  must explicitly implement `AtomicTransferProvider` before `/pay` works.
+* **Provider contract:** lock both accounts in deterministic order (or use an
+  ACID database transaction), validate funds and recipient, update both
+  balances, and commit or roll back both. All other writes to those accounts
+  must follow compatible concurrency control. Do **not** implement atomic
+  transfer by composing two independent futures. Vault imports do not offer a
+  transactional transfer capability and therefore return `NOT_SUPPORTED`.
+  Even with atomic storage, a network failure after commit can make a response
+  ambiguous: idempotency keys are needed before blindly retrying payments.
 * A provider is a plain object called from any thread: it must be thread-safe.
   On Paper, a plugin's currencies are withdrawn when it is disabled.
 

@@ -61,6 +61,50 @@ class SharedPlayersTest {
     }
 
     @Test
+    void brokenVanishRuleFailsClosedAndNeverLeaksPlayerNames() {
+        SharedPlayers.clearAll();
+        Object viewer = new Object();
+        Object hidden = new Object();
+        Object visible = new Object();
+        SharedPlayers.configureOnlinePlayers(() -> List.of(viewer, hidden, visible), (who, target) -> true);
+        PlayerDirectory directory = SharedPlayers.directory();
+        try {
+            EventSubscription rule = directory.visibility("vanish-plugin", (who, target) -> {
+                if (target == hidden) throw new IllegalStateException("visibility cache unavailable");
+                return true;
+            });
+            assertFalse(directory.canSee(viewer, hidden));
+            assertEquals(List.of(viewer, visible), directory.visibleTo(viewer));
+            assertTrue(directory.canSee(null, hidden), "console retains visibility");
+            assertTrue(directory.canSee(hidden, hidden), "self retains visibility");
+            rule.unsubscribe();
+            assertTrue(directory.canSee(viewer, hidden), "unsubscribing must restore default visibility");
+        } finally {
+            SharedPlayers.clearAll();
+        }
+    }
+
+    @Test
+    void brokenNativeVisibilityFailsClosedAndRecoversOnReconfiguration() {
+        SharedPlayers.clearAll();
+        Object viewer = new Object();
+        Object hidden = new Object();
+        SharedPlayers.configureOnlinePlayers(() -> List.of(hidden), (who, target) -> {
+            throw new IllegalStateException("Paper visibility service failed");
+        });
+        try {
+            PlayerDirectory directory = SharedPlayers.directory();
+            assertFalse(directory.canSee(viewer, hidden));
+            assertEquals(List.of(), directory.visibleTo(viewer));
+            assertTrue(directory.canSee(null, hidden));
+            SharedPlayers.configureOnlinePlayers(() -> List.of(hidden), (who, target) -> true);
+            assertTrue(directory.canSee(viewer, hidden));
+        } finally {
+            SharedPlayers.clearAll();
+        }
+    }
+
+    @Test
     void ownerIdIsRequired() {
         SharedPlayers.clearAll();
         PlayerDirectory directory = SharedPlayers.directory();
