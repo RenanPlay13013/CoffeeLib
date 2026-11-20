@@ -1583,3 +1583,71 @@ assumption of production readiness should be made from a stubbed compile.
 
 **Still pending in Phase 4:** inventory/menus (item 15) and cross-platform
 runtime homologation.
+
+
+## Read-only chest menus (Phase 4 / item 15)
+
+CoffeeLib provides a small, **locked** inventory menu API. It uses the native
+`ItemStack` and player type for each platform and a normal vanilla chest screen;
+`coffeelib-api` contains no Minecraft dependencies. Registering a custom client
+screen is **not** necessary. The library enforces a 1–6 row range and validates
+slot indices at configuration time.
+
+### Paper / Spigot (including 1.8.8)
+
+```java
+var kits = CoffeeLib.menus(plugin).chest(3)
+        .title("&6Kits")
+        .item(13, new org.bukkit.inventory.ItemStack(org.bukkit.Material.CHEST),
+                click -> click.player().closeInventory())
+        .locked();
+kits.open(player);
+```
+
+### Forge 1.20.1
+
+```java
+var kits = CoffeeLib.menus("yourmod").chest(3)
+        .title("&6Kits")
+        .item(13, new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.CHEST),
+                click -> click.player().closeContainer())
+        .locked();
+kits.open(serverPlayer);
+```
+
+### NeoForge 1.21.1
+
+```java
+var kits = CoffeeLib.menus(modContainer).chest(3)
+        .title("&6Kits")
+        .item(13, new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.CHEST),
+                click -> click.player().closeContainer())
+        .locked();
+kits.open(serverPlayer);
+```
+
+**Safety and lifecycle:**
+
+- Only **locked menus** are supported; attempting to open a menu without
+  `.locked()` throws immediately. Unlocked menus and transferring items are not
+  implemented yet. Items are display templates, cloned/copied into a fresh
+  container for each player. No player inventory is used as menu storage.
+- Clicking the top inventory with the left or right mouse button runs the callback
+  **on the following server tick**. Shift-click, drag, number-key, drop,
+  double-click, and all item-moving operations are blocked. Player inventory
+  clicks are also blocked while a locked menu is open.
+- Only one callback may be pending per menu, preventing duplicate actions when
+  several click packets arrive in the same server tick.
+- If the player leaves the menu before the callback executes, the callback is
+  discarded. Callback exceptions are logged with the owning plugin/mod and
+  never permitted to modify the locked container.
+- Call `.open(player)` only from the server thread. Forge and NeoForge callbacks
+  are scheduled using the owner's CoffeeLib scheduler; pending tasks are
+  canceled when the server stops. Paper menus and handlers are released when
+  the owning plugin disables.
+- Paper uses legacy inventory titles: on Spigot 1.8.8, the rendered title must
+  be at most 32 characters, including formatting codes. It rejects oversized
+  titles explicitly.
+- The menu intentionally uses the native chest screen. Adding input slots,
+  real item transfers, special client-side animations, or fully custom menus
+  requires a separate transactional design and is outside this initial API.

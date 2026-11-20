@@ -160,6 +160,11 @@ public final class CoffeeLib {
         return SharedPlayers.directory();
     }
 
+    /** Create safe, read-only chest menus for this plugin, including Spigot 1.8.8. */
+    public static net.loyalnetwork.coffeelib.paper.menu.PaperMenus menus(JavaPlugin plugin) {
+        return net.loyalnetwork.coffeelib.paper.menu.PaperMenus.forPlugin(plugin);
+    }
+
     /** Persistent player values using native PDC on Bukkit 1.14+. Fails explicitly on older servers. */
     public static net.loyalnetwork.coffeelib.api.player.PlayerDataFactory playerData(JavaPlugin plugin) {
         return net.loyalnetwork.coffeelib.paper.player.PaperPlayerDataFactory.forPlugin(plugin);

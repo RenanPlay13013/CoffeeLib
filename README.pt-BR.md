@@ -1582,3 +1582,66 @@ builds oficiais contra Forge/NeoForge, integração em Paper moderno e ensaios
 reais de reinício, morte e troca de dimensão. Os stubs não homologam o código.
 
 **Próximo item da Fase 4:** menus/inventários (item 15) e homologação real.
+
+
+## Menus de baú somente leitura (Fase 4 / item 15)
+
+A CoffeeLib disponibiliza uma API pequena para menus **bloqueados**, com
+`ItemStack` e jogador nativos de cada plataforma. O cliente usa o menu de baú
+vanilla, sem precisar registrar tela personalizada. O `coffeelib-api` não importa
+nenhum tipo Minecraft. São permitidas de 1 a 6 linhas; slots inválidos falham
+ao configurar o menu.
+
+### Paper / Spigot (inclusive 1.8.8)
+
+```java
+var kits = CoffeeLib.menus(plugin).chest(3)
+        .title("&6Kits")
+        .item(13, new org.bukkit.inventory.ItemStack(org.bukkit.Material.CHEST),
+                click -> click.player().closeInventory())
+        .locked();
+kits.open(player);
+```
+
+### Forge 1.20.1
+
+```java
+var kits = CoffeeLib.menus("yourmod").chest(3)
+        .title("&6Kits")
+        .item(13, new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.CHEST),
+                click -> click.player().closeContainer())
+        .locked();
+kits.open(serverPlayer);
+```
+
+### NeoForge 1.21.1
+
+```java
+var kits = CoffeeLib.menus(modContainer).chest(3)
+        .title("&6Kits")
+        .item(13, new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.CHEST),
+                click -> click.player().closeContainer())
+        .locked();
+kits.open(serverPlayer);
+```
+
+**Garantias e limites:**
+
+- Apenas menus **bloqueados**: abrir sem `.locked()` lança erro imediatamente.
+  Ainda não há slots editáveis nem movimentação de itens. O conteúdo é copiado
+  para um inventário novo por jogador; itens de exposição não são itens reais.
+- Apenas clique esquerdo/direito normal nos itens superiores dispara ações,
+  **no tick seguinte**. Shift, arrasto, número do teclado, drop e clique duplo
+  são bloqueados. Durante o menu também são bloqueados cliques no inventário
+  inferior do jogador para impedir transferências acidentais.
+- Apenas um callback pendente por menu; vários pacotes de clique no mesmo tick
+  não duplicam a execução da ação.
+- Se o jogador fechar a tela antes do callback, a ação não executa. Exceções
+  do callback são registradas no log com o dono.
+- Abra o menu apenas na thread do servidor. No Forge/NeoForge as ações usam o
+  scheduler da CoffeeLib e são canceladas ao parar o servidor. No Paper, menus
+  e referências são liberados quando o plugin é desativado.
+- Na compatibilidade com Spigot 1.8.8, o título renderizado do inventário
+  aceita no máximo 32 caracteres, contando códigos de formatação.
+- Menus com slots de entrada, transferências reais e telas personalizadas
+  continuam fora deste primeiro contrato por exigirem tratamento de transações.

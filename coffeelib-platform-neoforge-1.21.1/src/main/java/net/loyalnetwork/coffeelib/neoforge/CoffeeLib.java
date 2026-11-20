@@ -157,6 +157,15 @@ public final class CoffeeLib {
     }
 
     /** Persistent attachments; declare these from the consumer mod constructor before registries freeze. */
+    /** Read-only vanilla chest menus; requires the server thread. */
+    public static net.loyalnetwork.coffeelib.neoforge.menu.NeoForgeMenus menus(String modId) {
+        return new net.loyalnetwork.coffeelib.neoforge.menu.NeoForgeMenus(modId, scheduler(modId));
+    }
+
+    public static net.loyalnetwork.coffeelib.neoforge.menu.NeoForgeMenus menus(ModContainer container) {
+        return menus(container.getModId());
+    }
+
     public static net.loyalnetwork.coffeelib.api.player.PlayerDataFactory playerData(ModContainer container) {
         return net.loyalnetwork.coffeelib.neoforge.player.NeoForgePlayerDataFactory.forContainer(container);
     }

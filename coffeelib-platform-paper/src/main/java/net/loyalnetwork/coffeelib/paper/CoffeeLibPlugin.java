@@ -69,6 +69,7 @@ public final class CoffeeLibPlugin extends JavaPlugin implements Listener {
 
     @EventHandler
     public void onPluginDisable(PluginDisableEvent event) {
+        net.loyalnetwork.coffeelib.paper.menu.PaperMenus.releaseOwner(event.getPlugin());
         PaperScheduler.cancelOwner(event.getPlugin());
         net.loyalnetwork.coffeelib.paper.player.PaperPlayerDataFactory.releaseOwner(event.getPlugin().getName());
         SharedPermissionChanges.releaseOwner(event.getPlugin().getName());
@@ -106,6 +107,7 @@ public final class CoffeeLibPlugin extends JavaPlugin implements Listener {
     @Override
     public void onDisable() {
         if (permissionEvents != null) permissionEvents.stop();
+        net.loyalnetwork.coffeelib.paper.menu.PaperMenus.releaseOwner(this);
         PaperScheduler.cancelOwner(this);
         CommandRoots.releaseOwner(getName());
         SharedPlayers.clearAll();

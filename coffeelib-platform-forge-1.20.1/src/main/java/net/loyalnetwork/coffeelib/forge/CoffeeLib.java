@@ -160,6 +160,15 @@ public final class CoffeeLib {
         return new ForgeCommandManager(modId);
     }
 
+    /** Read-only vanilla chest menus; requires the server thread. */
+    public static net.loyalnetwork.coffeelib.forge.menu.ForgeMenus menus(String modId) {
+        return new net.loyalnetwork.coffeelib.forge.menu.ForgeMenus(modId, scheduler(modId));
+    }
+
+    public static net.loyalnetwork.coffeelib.forge.menu.ForgeMenus menus() {
+        return menus(ModLoadingContext.get().getActiveNamespace());
+    }
+
     /** Persistent values stored in the CoffeeLib native Forge capability. */
     public static net.loyalnetwork.coffeelib.api.player.PlayerDataFactory playerData(String modId) {
         return net.loyalnetwork.coffeelib.forge.player.ForgePlayerDataFactory.forOwner(modId);
