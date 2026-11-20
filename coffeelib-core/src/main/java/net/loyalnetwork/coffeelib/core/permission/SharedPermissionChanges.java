@@ -3,7 +3,6 @@ package net.loyalnetwork.coffeelib.core.permission;
 import net.loyalnetwork.coffeelib.api.event.EventSubscription;
 
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -24,9 +23,7 @@ import java.util.logging.Logger;
 public final class SharedPermissionChanges {
     private static final Logger LOG = Logger.getLogger(SharedPermissionChanges.class.getName());
     private static final Map<String, CopyOnWriteArrayList<Handle>> OWNERS = new ConcurrentHashMap<>();
-    private static final Object QUEUE_LOCK = new Object();
-    private static Set<UUID> pending = new HashSet<>();
-    private static boolean accepting = true;
+    private static final PermissionChangeBuffer BUFFER = new PermissionChangeBuffer();
 
     private SharedPermissionChanges() { }
 
@@ -45,18 +42,12 @@ public final class SharedPermissionChanges {
     /** May be called from any thread, including LuckPerms' async dispatcher. */
     public static void changed(UUID playerId) {
         Objects.requireNonNull(playerId, "playerId");
-        synchronized (QUEUE_LOCK) {
-            if (accepting) pending.add(playerId);
-        }
+        BUFFER.enqueue(playerId);
     }
 
     /** Must be called exactly once per Minecraft tick, on the actual server thread. */
     public static void flushTick() {
-        final Set<UUID> ready;
-        synchronized (QUEUE_LOCK) {
-            ready = pending;
-            pending = new HashSet<>();
-        }
+        final Set<UUID> ready = BUFFER.drain();
         if (ready.isEmpty()) return;
         // Snapshot the subscribers per tick. Unsubscribing mid-dispatch deactivates immediately.
         List<Handle> listeners = new ArrayList<>();
@@ -87,20 +78,17 @@ public final class SharedPermissionChanges {
 
     /** Resume dispatch when a server starts ticking (including an integrated server restart). */
     public static void resumeServer() {
-        synchronized (QUEUE_LOCK) { accepting = true; }
+        BUFFER.resume();
     }
 
     /** Stop accepting asynchronous notifications and discard anything belonging to this world. */
     public static void stopServer() {
-        synchronized (QUEUE_LOCK) {
-            accepting = false;
-            pending.clear();
-        }
+        BUFFER.suspend();
     }
 
     /** Discard queued changes without deactivating listeners. */
     public static void clearPending() {
-        synchronized (QUEUE_LOCK) { pending.clear(); }
+        BUFFER.clear();
     }
 
     /** On plugin unload / for test isolation. */

@@ -105,6 +105,22 @@ class SharedPlayersTest {
     }
 
     @Test
+    void unloadingReleasesPlatformEnumerationAndVisibilityState() {
+        SharedPlayers.clearAll();
+        PlayerDirectory directory = SharedPlayers.directory();
+        Object viewer = new Object();
+        Object target = new Object();
+        SharedPlayers.configureOnlinePlayers(() -> List.of(target), (who, player) -> false);
+        assertFalse(directory.canSee(viewer, target));
+        SharedPlayers.clearAll();
+        assertTrue(directory.canSee(viewer, target), "a stale native predicate must be released");
+        assertThrows(IllegalStateException.class, () -> directory.visibleTo(viewer));
+        SharedPlayers.configureOnlinePlayers(() -> List.of(target), (who, player) -> true);
+        assertEquals(List.of(target), directory.visibleTo(viewer));
+        SharedPlayers.clearAll();
+    }
+
+    @Test
     void ownerIdIsRequired() {
         SharedPlayers.clearAll();
         PlayerDirectory directory = SharedPlayers.directory();

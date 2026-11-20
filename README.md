@@ -1664,3 +1664,5 @@ kits.open(serverPlayer);
 - The menu intentionally uses the native chest screen. Adding input slots,
   real item transfers, special client-side animations, or fully custom menus
   requires a separate transactional design and is outside this initial API.
+
+**Architecture:** [DDD and Object Calisthenics guidelines](docs/architecture/ddd-object-calisthenics.md).

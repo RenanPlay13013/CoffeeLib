@@ -162,15 +162,9 @@ final class RegistryCurrency implements Currency {
         }
     }
 
+    /** Kept for existing package-local callers. Monetary invariants live in their own policy. */
     static String invalidAmount(BigDecimal amount, int fractionalDigits, boolean zeroAllowed) {
-        int sign = amount.signum();
-        if (sign < 0 || (sign == 0 && !zeroAllowed)) {
-            return "Amount must be " + (zeroAllowed ? "zero or more" : "more than zero") + ", not " + amount.toPlainString();
-        }
-        if (amount.stripTrailingZeros().scale() > Math.max(fractionalDigits, 0)) {
-            return "Amount " + amount.toPlainString() + " has more than " + fractionalDigits + " decimal place(s)";
-        }
-        return null;
+        return new MoneyAmountPolicy(fractionalDigits, zeroAllowed).invalidReason(amount);
     }
 
     private CoffeeLibException noProvider() {

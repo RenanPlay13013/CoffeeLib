@@ -1658,3 +1658,5 @@ kits.open(serverPlayer);
   aceita no máximo 32 caracteres, contando códigos de formatação.
 - Menus com slots de entrada, transferências reais e telas personalizadas
   continuam fora deste primeiro contrato por exigirem tratamento de transações.
+
+**Arquitetura:** [Diretrizes de DDD e Object Calisthenics](docs/architecture/ddd-object-calisthenics.pt-BR.md).
