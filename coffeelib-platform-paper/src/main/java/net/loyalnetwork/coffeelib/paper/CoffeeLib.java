@@ -207,14 +207,14 @@ public final class CoffeeLib {
         TextFormatter<String> formatter = text(plugin);
         Scheduler main = scheduler(plugin);
         return MessageCatalogs.open(plugin.getName(), plugin.getDataFolder().toPath(), catalogType,
-                (recipient, message) -> main.onMain(() -> {
+                (net.loyalnetwork.coffeelib.core.text.MessageDelivery) (recipient, message, textContext) -> main.onMain(() -> {
                     if (!plugin.isEnabled()) return;
                     Object nativeRecipient = recipient instanceof CommandSource source ? source.unwrap() : recipient;
                     if (!(nativeRecipient instanceof CommandSender sender)) {
                         throw new IllegalArgumentException("Unsupported Paper message recipient: " + nativeRecipient.getClass());
                     }
                     if (sender instanceof Player player && !player.isOnline()) return;
-                    sender.sendMessage(formatter.parse(message, sender instanceof Player ? sender : null));
+                    sender.sendMessage(formatter.parse(message, sender instanceof Player ? sender : null, textContext));
                 }));
     }
 }

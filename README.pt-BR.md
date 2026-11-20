@@ -102,15 +102,15 @@ repositories {
 
 dependencies {
     // Paper
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-paper:3.10.1")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-paper:3.11")
     // Forge 1.20.1
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-forge-1.20.1:3.10.1")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-forge-1.20.1:3.11")
     // NeoForge 1.21.1
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-neoforge-1.21.1:3.10.1")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-neoforge-1.21.1:3.11")
     // Ou apenas o core agnóstico de formato (config + DI, sem backend de plataforma)
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-core:3.10.1")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-core:3.11")
     // Ou só as interfaces e anotações
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-api:3.10.1")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-api:3.11")
 }
 ```
 
@@ -806,6 +806,52 @@ String line = placeholders.apply(player, "Você tem %crates_keys% chaves - %econ
   desabilitado.
 * Operadores conferem com `/coffeelib placeholder list` e
   `/coffeelib placeholder parse <texto>` no Forge/NeoForge.
+
+
+### Placeholders sobre algo: `TextContext`
+
+Um texto muitas vezes é *sobre* alguma coisa - o ícone de um kit, a prévia de uma
+crate, a mensagem de uma warp - e os placeholders dele precisam saber do quê.
+Diga isso onde o texto é montado, e receba no resolver com `@Context`:
+
+```java
+@Placeholder("kit_remaining")                         // %ravenessentials_kit_remaining%
+String remaining(ServerPlayer player, @Context Kit kit) { ... }
+
+TextContext about = TextContext.of(kit);
+formatter.parse(kit.iconName(), player, about);                     // uma linha de texto
+placeholders.apply(player, text, about);                            // uma string comum
+messages.send(player, about, m -> m.claimed, "uses", uses);         // uma mensagem do catálogo
+menus.chest(3).title(preview.title()).context(about).locked().open(player);   // o título de um menu
+```
+
+* **Passado adiante, nunca guardado**: o contexto vai junto com a chamada - sem
+  `ThreadLocal` - então vale em qualquer thread e em qualquer momento, inclusive
+  no título de um menu, que a plataforma só lê quando o menu abre.
+* **Um valor por classe**, buscado pelo tipo (uma subclasse responde pela
+  superclasse). `TextContext.of` recusa `null` e dois valores da mesma classe;
+  `with(valor)` acrescenta um ou troca o da mesma classe. Use valores imutáveis:
+  as referências são guardadas como vieram.
+* **Sem o valor, o placeholder fica como está escrito**, como quando falta o
+  jogador. O mesmo acontece quando dois valores serviriam (um `@Context Named`
+  com uma warp e uma home, as duas `Named`): ele fica sem resolver, com um aviso
+  no log, em vez de escolher um ao acaso.
+* **Vários tipos no mesmo método** são permitidos (`@Context Kit kit, @Context Crate crate`).
+  Um `@Context` num `String`, num primitivo, em `PlaceholderContext`, num tipo de
+  jogador, ou dois do mesmo tipo, falha no registro, com o nome do método.
+* **Compartilhado por todos os namespaces** do texto: o placeholder de outro mod
+  pode ler o mesmo `Kit` se conhecer a classe - de propósito. Resolvers
+  registrados com lambda o enxergam por `PlaceholderContext.text()`.
+* **O PlaceholderAPI não tem contexto.** No Paper, a CoffeeLib resolve os
+  placeholders dela primeiro, com o contexto, e depois o PlaceholderAPI resolve o
+  resto; mas um placeholder com `@Context` chamado *pelo* PlaceholderAPI - o texto
+  de outro plugin, um plugin de scoreboard - nunca resolve, porque o
+  PlaceholderAPI só conhece o jogador. O `/coffeelib placeholder parse` também não
+  resolve, e avisa.
+* Os pares `{nome}` do catálogo de mensagens continuam como estão: são os valores
+  daquela mensagem; o contexto é para placeholders que outros mods também resolvem.
+* Os títulos de menu no Paper agora também resolvem placeholders, como no Forge e
+  no NeoForge.
 
 ---
 

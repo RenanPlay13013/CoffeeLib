@@ -3,6 +3,7 @@ package net.loyalnetwork.coffeelib.core.placeholder;
 import net.loyalnetwork.coffeelib.api.exception.CoffeeLibException;
 import net.loyalnetwork.coffeelib.api.placeholder.PlaceholderContext;
 import net.loyalnetwork.coffeelib.api.placeholder.PlaceholderResolver;
+import net.loyalnetwork.coffeelib.api.placeholder.TextContext;
 
 import java.util.Map;
 import java.util.Set;
@@ -36,6 +37,9 @@ public final class PlaceholderRegistry {
 
     /** Lower case letters, digits, {@code _} and {@code -}, starting with a letter or digit. */
     static final Pattern NAME = Pattern.compile("[a-z0-9][a-z0-9_-]*");
+
+    /** A {@code %token%} with no whitespace in it, as {@link #apply} reads them. */
+    private static final Pattern TOKEN = Pattern.compile("%([^%\\s]+)%");
 
     private final Map<String, Map<String, Entry>> namespaces = new ConcurrentHashMap<>();
 
@@ -85,6 +89,12 @@ public final class PlaceholderRegistry {
 
     /** Fills in every placeholder in {@code text} that some namespace can answer. */
     public String apply(Object player, String text) {
+        return apply(player, text, TextContext.EMPTY);
+    }
+
+    /** {@link #apply(Object, String)}, every resolver given {@code context}. */
+    public String apply(Object player, String text, TextContext context) {
+        java.util.Objects.requireNonNull(context, "context");
         if (text == null || text.indexOf('%') < 0) {
             return text;
         }
@@ -104,7 +114,7 @@ public final class PlaceholderRegistry {
             }
 
             String token = text.substring(open + 1, close);
-            String value = token.isEmpty() || containsWhitespace(token) ? null : resolveToken(player, token);
+            String value = token.isEmpty() || containsWhitespace(token) ? null : resolveToken(player, token, context);
             out.append(text, index, open);
             if (value != null) {
                 out.append(value);
@@ -120,14 +130,43 @@ public final class PlaceholderRegistry {
     }
 
     /** {@code namespace_rest} with the namespace matched longest-first against the registered ones. */
-    private String resolveToken(Object player, String token) {
+    private String resolveToken(Object player, String token, TextContext context) {
+        String best = namespaceOf(token);
+        return best == null ? null : resolve(best, token.substring(best.length() + 1), player, context);
+    }
+
+    private String namespaceOf(String token) {
         String best = null;
         for (String namespace : namespaces.keySet()) {
             if (token.startsWith(namespace + "_") && (best == null || namespace.length() > best.length())) {
                 best = namespace;
             }
         }
-        return best == null ? null : resolve(best, token.substring(best.length() + 1), player);
+        return best;
+    }
+
+    /**
+     * The placeholders left in {@code text} that cannot resolve without a
+     * text context - registered {@code @Context} placeholders - as written,
+     * {@code %namespace_key...%}. For {@code /coffeelib placeholder parse},
+     * which has no context to give and says so.
+     */
+    public java.util.List<String> needingContext(String text) {
+        java.util.List<String> found = new java.util.ArrayList<>();
+        if (text == null) {
+            return found;
+        }
+        java.util.regex.Matcher matcher = TOKEN.matcher(text);
+        while (matcher.find()) {
+            String token = matcher.group(1);
+            String namespace = namespaceOf(token);
+            Entry entry = namespace == null ? null : entryFor(namespace, token.substring(namespace.length() + 1));
+            if (entry != null && entry.resolver() instanceof PlaceholderScanner.Requirements requirements
+                    && !requirements.contextTypes().isEmpty()) {
+                found.add(matcher.group());
+            }
+        }
+        return found;
     }
 
     /**
@@ -137,26 +176,20 @@ public final class PlaceholderRegistry {
      * {@code params} or followed by {@code _}; the rest is the argument.
      */
     public String resolve(String namespace, String params, Object player) {
-        Map<String, Entry> keys = namespaces.get(namespace);
-        if (keys == null) {
-            return null;
-        }
+        return resolve(namespace, params, player, TextContext.EMPTY);
+    }
 
-        String key = null;
-        for (String candidate : keys.keySet()) {
-            boolean matches = params.equals(candidate) || params.startsWith(candidate + "_");
-            if (matches && (key == null || candidate.length() > key.length())) {
-                key = candidate;
-            }
-        }
+    /** {@link #resolve(String, String, Object)}, the resolver given {@code context}. */
+    public String resolve(String namespace, String params, Object player, TextContext context) {
+        String key = keyFor(namespace, params);
         if (key == null) {
             return null;
         }
 
-        Entry entry = keys.get(key);
+        Entry entry = namespaces.get(namespace).get(key);
         String argument = params.length() > key.length() ? params.substring(key.length() + 1) : "";
         try {
-            return entry.resolver().resolve(new Context(player, key, argument));
+            return entry.resolver().resolve(new Context(player, key, argument, namespace, context));
         } catch (RuntimeException | LinkageError e) {
             // Same isolation as the event bus: one owner's broken placeholder costs that
             // placeholder, not the whole line of text or the caller.
@@ -164,6 +197,27 @@ public final class PlaceholderRegistry {
                     + params + "% failed", e);
             return null;
         }
+    }
+
+    /** The longest registered key that is all of {@code params} or followed by {@code _}. */
+    private String keyFor(String namespace, String params) {
+        Map<String, Entry> keys = namespaces.get(namespace);
+        if (keys == null) {
+            return null;
+        }
+        String key = null;
+        for (String candidate : keys.keySet()) {
+            boolean matches = params.equals(candidate) || params.startsWith(candidate + "_");
+            if (matches && (key == null || candidate.length() > key.length())) {
+                key = candidate;
+            }
+        }
+        return key;
+    }
+
+    private Entry entryFor(String namespace, String params) {
+        String key = keyFor(namespace, params);
+        return key == null ? null : namespaces.get(namespace).get(key);
     }
 
     private static boolean containsWhitespace(String token) {
@@ -185,6 +239,7 @@ public final class PlaceholderRegistry {
     private record Entry(String ownerId, PlaceholderResolver resolver) {
     }
 
-    private record Context(Object player, String key, String argument) implements PlaceholderContext {
+    private record Context(Object player, String key, String argument, String namespace, TextContext text)
+            implements PlaceholderContext {
     }
 }

@@ -44,4 +44,14 @@ public interface PlaceholderManager {
      * just this one - for {@code player} (platform type, or {@code null}).
      */
     String apply(Object player, String text);
+
+    /**
+     * {@link #apply(Object, String)}, with {@code context} passed to every
+     * resolver - {@code @Context} parameters and {@link PlaceholderContext#text()}.
+     * CoffeeLib's own managers implement it; the default is for implementations
+     * from elsewhere.
+     */
+    default String apply(Object player, String text, TextContext context) {
+        throw new UnsupportedOperationException(getClass().getName() + " does not support text contexts");
+    }
 }

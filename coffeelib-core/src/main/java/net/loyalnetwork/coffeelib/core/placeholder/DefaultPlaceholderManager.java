@@ -2,6 +2,7 @@ package net.loyalnetwork.coffeelib.core.placeholder;
 
 import net.loyalnetwork.coffeelib.api.placeholder.PlaceholderManager;
 import net.loyalnetwork.coffeelib.api.placeholder.PlaceholderResolver;
+import net.loyalnetwork.coffeelib.api.placeholder.TextContext;
 
 import java.util.Map;
 import java.util.Set;
@@ -68,5 +69,10 @@ public class DefaultPlaceholderManager implements PlaceholderManager {
     @Override
     public String apply(Object player, String text) {
         return registry.apply(player, text);
+    }
+
+    @Override
+    public String apply(Object player, String text, TextContext context) {
+        return registry.apply(player, text, context);
     }
 }

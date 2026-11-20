@@ -22,4 +22,14 @@ public interface PlaceholderContext {
 
     /** What followed the key and an underscore, or an empty string. */
     String argument();
+
+    /** The namespace the placeholder was registered under; empty if the resolver was called directly. */
+    default String namespace() {
+        return "";
+    }
+
+    /** What the text is about, as whoever built it said; {@link TextContext#EMPTY} if nothing. */
+    default TextContext text() {
+        return TextContext.EMPTY;
+    }
 }

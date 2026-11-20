@@ -33,6 +33,11 @@ public final class NeoForgeTextFormatter implements TextFormatter<MutableCompone
     }
 
     @Override
+    public MutableComponent parse(String text, Object player, net.loyalnetwork.coffeelib.api.placeholder.TextContext context) {
+        return parse(SharedPlaceholders.apply(player, text, context));
+    }
+
+    @Override
     public String strip(String text) {
         return StyledText.parse(text).plain();
     }

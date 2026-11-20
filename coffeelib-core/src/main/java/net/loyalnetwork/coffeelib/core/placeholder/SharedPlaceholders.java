@@ -34,6 +34,26 @@ public final class SharedPlaceholders {
         return REGISTRY.apply(player, text);
     }
 
+    /** {@link #apply(Object, String)}, every resolver given {@code context}. */
+    public static String apply(Object player, String text, net.loyalnetwork.coffeelib.api.placeholder.TextContext context) {
+        return REGISTRY.apply(player, text, context);
+    }
+
+    private static volatile java.util.List<Class<?>> playerTypes = java.util.List.of();
+
+    /**
+     * The platform's player types - set by each platform when it starts - so a
+     * {@code @Context} parameter of one is refused at registration: the player
+     * is a parameter of its own, never a context value.
+     */
+    public static void playerTypes(Class<?>... types) {
+        playerTypes = java.util.List.of(types);
+    }
+
+    static java.util.List<Class<?>> playerTypes() {
+        return playerTypes;
+    }
+
     public static Set<String> namespaces() {
         return REGISTRY.namespaces();
     }

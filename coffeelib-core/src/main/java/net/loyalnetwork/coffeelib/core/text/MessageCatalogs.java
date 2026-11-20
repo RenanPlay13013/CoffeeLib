@@ -21,6 +21,12 @@ public final class MessageCatalogs {
      */
     public static <T> Messages<T> open(String owner, Path directory, Class<T> type,
                                        BiConsumer<Object, String> delivery) {
+        Objects.requireNonNull(delivery, "delivery");
+        return open(owner, directory, type, (MessageDelivery) (recipient, text, context) -> delivery.accept(recipient, text));
+    }
+
+    /** {@link #open(String, Path, Class, BiConsumer)}, the delivery given each message's text context. */
+    public static <T> Messages<T> open(String owner, Path directory, Class<T> type, MessageDelivery delivery) {
         Objects.requireNonNull(type, "type");
         if (!type.isAnnotationPresent(ConfigFile.class)) {
             throw new IllegalArgumentException("Message catalog " + type.getName() + " must use @ConfigFile");

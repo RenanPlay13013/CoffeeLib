@@ -16,6 +16,8 @@ public final class Menu<S, P> {
     private final int rows;
     private final Map<Integer, MenuSnapshot.Entry<S, P>> items = new HashMap<>();
     private String title = "";
+    private net.loyalnetwork.coffeelib.api.placeholder.TextContext context =
+            net.loyalnetwork.coffeelib.api.placeholder.TextContext.EMPTY;
     private boolean locked;
 
     private Menu(int rows, MenuOpener<S, P> opener) {
@@ -30,6 +32,17 @@ public final class Menu<S, P> {
 
     public Menu<S, P> title(String title) {
         this.title = Objects.requireNonNull(title, "title");
+        return this;
+    }
+
+    /**
+     * What the menu is about, for the placeholders of its title: the title is
+     * only read when the platform opens the menu, so this is how a
+     * {@code @Context} placeholder in it - a kit's name in its preview - is
+     * resolved then.
+     */
+    public Menu<S, P> context(net.loyalnetwork.coffeelib.api.placeholder.TextContext context) {
+        this.context = Objects.requireNonNull(context, "context");
         return this;
     }
 
@@ -53,7 +66,7 @@ public final class Menu<S, P> {
     public void open(P player) {
         Objects.requireNonNull(player, "player");
         if (!locked) throw new IllegalStateException("Only locked chest menus are supported");
-        opener.open(new MenuSnapshot<>(rows, title, items), player);
+        opener.open(new MenuSnapshot<>(rows, title, items, context), player);
     }
 
     private void checkSlot(int slot) {

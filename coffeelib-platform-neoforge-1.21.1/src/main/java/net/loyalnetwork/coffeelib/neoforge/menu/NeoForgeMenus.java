@@ -43,7 +43,7 @@ public final class NeoForgeMenus {
             contents.setItem(item.getKey(), item.getValue().stack().copy());
         SimpleMenuProvider provider = new SimpleMenuProvider(
                 (window, inventory, viewer) -> new LockedChestMenu(spec, window, inventory, contents, player),
-                new NeoForgeTextFormatter().parse(spec.title(), player));
+                new NeoForgeTextFormatter().parse(spec.title(), player, spec.context()));
         player.openMenu(provider);
     }
 

@@ -46,4 +46,23 @@ class DefaultMessagesTest {
         model.welcome = "Revised {player}";
         assertEquals("Revised Ana", messages.render(c -> c.welcome, "player", "Ana"));
     }
+
+    /** Item 17: the context reaches the platform's delivery, which resolves %placeholders% with it. */
+    @Test void aTextContextTravelsToTheDeliveryWhileNamedValuesStayAsTheyAre() {
+        record Kit(String name) { }
+        net.loyalnetwork.coffeelib.api.placeholder.TextContext kit =
+                net.loyalnetwork.coffeelib.api.placeholder.TextContext.of(new Kit("vip"));
+        List<String> sent = new ArrayList<>();
+        List<net.loyalnetwork.coffeelib.api.placeholder.TextContext> contexts = new ArrayList<>();
+        DefaultMessages<Catalog> messages = new DefaultMessages<>(new Catalog(), RELOAD,
+                (MessageDelivery) (to, text, context) -> { sent.add(text); contexts.add(context); });
+
+        messages.send("player", kit, c -> c.welcome, "player", "Ana", "coins", 7);
+        messages.send("player", c -> c.welcome, "player", "Bo", "coins", 1);
+
+        assertEquals(List.of("Welcome Ana, 7!", "Welcome Bo, 1!"), sent);
+        assertSame(kit, contexts.get(0));
+        assertSame(net.loyalnetwork.coffeelib.api.placeholder.TextContext.EMPTY, contexts.get(1),
+                "the old send passes an empty context");
+    }
 }

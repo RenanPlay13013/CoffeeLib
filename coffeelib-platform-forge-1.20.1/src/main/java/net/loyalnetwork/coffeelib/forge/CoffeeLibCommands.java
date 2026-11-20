@@ -267,6 +267,12 @@ final class CoffeeLibCommands {
                                             String text = StringArgumentType.getString(context, "text");
                                             String parsed = SharedPlaceholders.apply(context.getSource().getPlayer(), text);
                                             context.getSource().sendSuccess(() -> info(parsed), false);
+                                            java.util.List<String> needContext = SharedPlaceholders.registry().needingContext(parsed);
+                                            if (!needContext.isEmpty()) {
+                                                context.getSource().sendSuccess(() -> info("Left as written: "
+                                                        + String.join(", ", needContext) + " need what the text is about "
+                                                        + "(a @Context value), which this command cannot give"), false);
+                                            }
                                             return 1;
                                         })))));
     }

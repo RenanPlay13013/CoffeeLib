@@ -1,5 +1,6 @@
 package net.loyalnetwork.coffeelib.core.text;
 
+import net.loyalnetwork.coffeelib.api.placeholder.TextContext;
 import net.loyalnetwork.coffeelib.api.text.Messages;
 import net.loyalnetwork.coffeelib.api.config.ConfigReloadService;
 
@@ -11,12 +12,22 @@ import java.util.function.Function;
 public final class DefaultMessages<T> implements Messages<T> {
     private final T catalog;
     private final ConfigReloadService reloadService;
-    private final BiConsumer<Object, String> delivery;
+    private final MessageDelivery delivery;
 
+    /** A delivery that has no use for a text context: it is dropped. */
     public DefaultMessages(T catalog, ConfigReloadService reloadService, BiConsumer<Object, String> delivery) {
+        this(catalog, reloadService, withoutContext(delivery));
+    }
+
+    public DefaultMessages(T catalog, ConfigReloadService reloadService, MessageDelivery delivery) {
         this.catalog = Objects.requireNonNull(catalog, "catalog");
         this.reloadService = Objects.requireNonNull(reloadService, "reloadService");
         this.delivery = Objects.requireNonNull(delivery, "delivery");
+    }
+
+    private static MessageDelivery withoutContext(BiConsumer<Object, String> delivery) {
+        Objects.requireNonNull(delivery, "delivery");
+        return (recipient, text, context) -> delivery.accept(recipient, text);
     }
 
     @Override
@@ -32,7 +43,13 @@ public final class DefaultMessages<T> implements Messages<T> {
 
     @Override
     public void send(Object recipient, Function<T, String> template, Object... namesAndValues) {
+        send(recipient, TextContext.EMPTY, template, namesAndValues);
+    }
+
+    @Override
+    public void send(Object recipient, TextContext context, Function<T, String> template, Object... namesAndValues) {
         Objects.requireNonNull(recipient, "recipient");
-        delivery.accept(recipient, render(template, namesAndValues));
+        Objects.requireNonNull(context, "context");
+        delivery.deliver(recipient, render(template, namesAndValues), context);
     }
 }

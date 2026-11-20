@@ -187,6 +187,7 @@ public final class CoffeeLib {
 
     /** Placeholders for {@code modId} under a namespace of its own choosing, e.g. {@code "crates"}. */
     public static PlaceholderManager placeholders(String modId, String namespace) {
+        SharedPlaceholders.playerTypes(net.minecraft.world.entity.player.Player.class);
         return SharedPlaceholders.forOwner(modId, namespace);
     }
 
@@ -335,18 +336,18 @@ public final class CoffeeLib {
         TextFormatter<MutableComponent> formatter = new ForgeTextFormatter();
         Scheduler main = scheduler(modId);
         return MessageCatalogs.open(modId, configDirectory().resolve(modId), catalogType,
-                (recipient, message) -> main.onMain(() -> {
+                (net.loyalnetwork.coffeelib.core.text.MessageDelivery) (recipient, message, textContext) -> main.onMain(() -> {
                     Object nativeRecipient = recipient instanceof CommandSource source ? source.unwrap() : recipient;
                     if (nativeRecipient instanceof CommandSourceStack stack) {
                         ServerPlayer player = stack.getPlayer();
                         if (player == null || !player.hasDisconnected()) {
-                            stack.sendSystemMessage(formatter.parse(message, player));
+                            stack.sendSystemMessage(formatter.parse(message, player, textContext));
                         }
                         return;
                     }
                     if (nativeRecipient instanceof ServerPlayer player) {
                         if (!player.hasDisconnected()) {
-                            player.sendSystemMessage(formatter.parse(message, player));
+                            player.sendSystemMessage(formatter.parse(message, player, textContext));
                         }
                         return;
                     }

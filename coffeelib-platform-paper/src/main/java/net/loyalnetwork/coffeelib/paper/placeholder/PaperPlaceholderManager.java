@@ -25,6 +25,8 @@ public final class PaperPlaceholderManager implements PlaceholderManager {
     private final DefaultPlaceholderManager delegate;
 
     public PaperPlaceholderManager(JavaPlugin plugin, String namespace) {
+        // The platform's player types, so a @Context Player is refused at registration.
+        SharedPlaceholders.playerTypes(org.bukkit.OfflinePlayer.class);
         this.plugin = plugin;
         this.delegate = new DefaultPlaceholderManager(SharedPlaceholders.registry(), plugin.getName(),
                 SharedPlaceholders.normalize(namespace), (ns, key) -> {
@@ -64,7 +66,17 @@ public final class PaperPlaceholderManager implements PlaceholderManager {
 
     @Override
     public String apply(Object player, String text) {
-        String ours = delegate.apply(player, text);
+        return apply(player, text, net.loyalnetwork.coffeelib.api.placeholder.TextContext.EMPTY);
+    }
+
+    /**
+     * CoffeeLib's placeholders first, with {@code context}; then PlaceholderAPI
+     * for what is left - which has no context, so it only ever sees the
+     * text's player.
+     */
+    @Override
+    public String apply(Object player, String text, net.loyalnetwork.coffeelib.api.placeholder.TextContext context) {
+        String ours = delegate.apply(player, text, context);
         return PapiBridge.available() ? PapiBridge.apply(player, ours) : ours;
     }
 

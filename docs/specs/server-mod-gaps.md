@@ -37,6 +37,7 @@ que **sai do mod** depois.
 | **2** | 2 Tipos de argumento · 3 Alvo `[player]` · 4 Visibilidade · 6 Sugestões com contexto · 7 Substituir vanilla | O que mais tira código dos comandos. |
 | **3** | 5 Mudança de permissão · 8 Texto e mensagens · 11 DI ligada à lib | Melhoram a arquitetura dos mods. |
 | **4** | 12 Localização · 13 Dados no jogador · 14 Permissão numérica · 15 Menus | Necessários para homes, kits e warps. |
+| **5** ✅ | 17 Placeholders com contexto | Apareceu com os kits; qualquer sistema que monta texto *sobre algo* (crates, warps, lojas) precisa. |
 
 ---
 
@@ -618,6 +619,150 @@ Menu.chest(3).title("&6Kits")
 - **Paper:** um `InventoryHolder` próprio e o `InventoryClickEvent`.
 
 Para detalhar quando houver o primeiro uso real: kits ou `/warp`.
+
+---
+
+## Fase 5
+
+### 17. Placeholders com contexto
+
+**No RavenEssentials:** os kits têm placeholders no plural, com o kit no argumento
+(`%ravenessentials_kits_remaining_vip%`), e no singular, sobre "o kit deste texto"
+(`%ravenessentials_kit_remaining%`): o ícone de cada kit na lista, a prévia, a
+mensagem de pegar. O resolver da lib só recebe o jogador e o argumento, então o
+mod inventou o kit atual:
+
+- `KitContext` guarda o kit num `ThreadLocal` enquanto o texto é montado, e os
+  métodos `kit_*` leem dali.
+- `Placeholders.render(...)` envolve cada `TEXT.parse` com esse contexto.
+- A prévia precisa abrir o menu dentro do contexto
+  (`KitContext.during(kit, () -> menu.locked().open(player))`), porque o título só é
+  lido pela plataforma no `open`.
+
+Funciona só porque o parse acontece na mesma thread e na mesma hora. Qualquer texto
+que a lib ler depois (um título, uma mensagem agendada) perde o kit, e nada na
+assinatura do `TextFormatter` diz que o texto dependia dele. Todo mod com
+"coisas" (crates, warps, homes, lojas, punições) vai refazer o mesmo jeitinho.
+
+**A ideia:** quem monta o texto diz explicitamente sobre o que ele é, e esse
+contexto acompanha o texto até o resolver. O mod continua dono de *quais*
+contextos existem e dos valores; a lib só transporta.
+
+**API** (`coffeelib-api`, pacote `placeholder`; tudo aditivo):
+
+1. **O contexto**, um conjunto imutável de valores, um por tipo:
+   ```java
+   public final class TextContext {
+       public static final TextContext EMPTY = ...;
+
+       /** Falha se dois valores forem da mesma classe, ou se algum for null. */
+       public static TextContext of(Object... values);
+
+       /** Uma cópia com {@code value} a mais (ou no lugar do de mesma classe). */
+       public TextContext with(Object value);
+
+       /** O valor da classe pedida, ou de uma subclasse dela; vazio se não houver. */
+       public <T> Optional<T> get(Class<T> type);
+   }
+   ```
+
+2. **No resolver:** o `PlaceholderContext` ganha o contexto, e o `@Placeholder` ganha
+   a injeção por tipo:
+   ```java
+   public interface PlaceholderContext {
+       // ...player(), key(), argument() como hoje
+       default TextContext text() { return TextContext.EMPTY; }
+   }
+
+   /** Num parâmetro de método @Placeholder: o valor vem do contexto do texto, pelo tipo. */
+   @Retention(RUNTIME) @Target(PARAMETER)
+   public @interface Context { }
+   ```
+   ```java
+   @Placeholder("kit_remaining")                  // %ravenessentials_kit_remaining%
+   String remaining(ServerPlayer player, @Context Kit kit) { ... }
+   ```
+   Sem um `Kit` no contexto, o método não é chamado e o placeholder fica como está
+   escrito, a mesma regra que já vale para o jogador.
+
+3. **Quem aplica**, com sobrecargas que recebem o contexto (as atuais passam a
+   chamar estas com `TextContext.EMPTY`):
+   ```java
+   // PlaceholderManager
+   default String apply(Object player, String text, TextContext context) { throw new UnsupportedOperationException(...); }
+
+   // TextFormatter
+   default C parse(String text, Object player, TextContext context) { throw new UnsupportedOperationException(...); }
+
+   // Messages
+   void send(Object recipient, TextContext context, Function<T, String> template, Object... namesAndValues);
+
+   // Menu (o título é lido no open, já com o contexto)
+   public Menu<S, P> context(TextContext context);
+   ```
+   As implementações da lib (o `DefaultPlaceholderManager`, os três `TextFormatter`,
+   o catálogo de mensagens e os menus) implementam todas; o `default` que lança é só
+   para implementações de fora, como no `PermissionManager`.
+
+**Comportamento:**
+
+- **Registro compartilhado:** o contexto vale para o texto inteiro, de qualquer
+  namespace. Um mod pode ler o contexto de outro se conhecer a classe (um mod de
+  scoreboard lendo o `Kit` do RavenEssentials, por exemplo). Isso é intencional e
+  vai documentado.
+- **Sem `ThreadLocal`:** o contexto é passado de mão em mão, então vale em qualquer
+  thread e em qualquer momento. Os resolvers continuam rodando na thread de quem
+  aplica, como hoje.
+- **NeoForge e Forge:** `parse(text, player, context)` repassa ao registro e depois
+  formata, igual ao `parse(text, player)` de hoje.
+- **Paper:** a CoffeeLib resolve primeiro, com o contexto, e o PlaceholderAPI
+  resolve o que sobrou. **O PlaceholderAPI não tem contexto** (só jogador e, nos
+  relacionais, dois jogadores): pela expansão publicada (`PapiBridge`), um
+  placeholder com `@Context` fica sempre sem resolver. Isso entra no Javadoc do
+  `@Context` e nos READMEs, para ninguém achar que é bug.
+- **`/coffeelib placeholders parse`:** não tem contexto, então os placeholders com
+  `@Context` saem como estão. O comando passa a dizer isso quando sobra algum.
+- **Pares `{nome}` do catálogo** (item 8): continuam como estão. Eles são valores
+  prontos daquela mensagem; o contexto é para placeholders que outros mods também
+  resolvem.
+
+**Casos de borda:**
+
+- `@Context` num parâmetro `String`, primitivo, `PlaceholderContext` ou no tipo do
+  jogador: erro no `register`, com o nome do método.
+- Dois parâmetros `@Context` do mesmo tipo: erro no `register`. Tipos diferentes
+  são permitidos (`@Context Kit kit, @Context Crate crate`).
+- `TextContext.of` com dois valores da mesma classe ou com `null`:
+  `IllegalArgumentException` na hora, de quem montou o contexto.
+- `get(Class)` em que mais de um valor serve (pedir `Object`, ou uma interface que
+  dois valores implementam): vazio, e um aviso no log uma vez por chave
+  (`namespace_key`). O placeholder fica sem resolver em vez de escolher um ao acaso.
+- O contexto guarda referências: se o mod puser algo mutável ali, a lib não copia.
+  O Javadoc recomenda valores imutáveis (o `Kit` do RavenEssentials já é).
+
+**Testes** (core, com plataforma falsa):
+
+- Um `@Placeholder` com `@Context` recebe o valor do contexto; sem ele, o texto sai
+  como estava.
+- Jogador e contexto juntos, e só um dos dois presente.
+- Dois tipos de contexto no mesmo método.
+- Os erros do `register` listados acima.
+- `TextContext`: `of` com duplicata e com `null`, `with` substituindo, `get` por
+  subtipo, `get` ambíguo.
+- Um placeholder de outro namespace no mesmo texto também enxerga o contexto.
+- `apply(player, text)` sem contexto continua idêntico ao de hoje (regressão).
+- Paper: pela expansão do PlaceholderAPI, o placeholder com `@Context` não resolve.
+- Menu: o título com placeholder de contexto sai resolvido no `open`.
+
+**Sai do RavenEssentials:**
+
+- O `KitContext` e o `Placeholders.about(...)` / `render(...)`.
+- O `KitContext.during(...)` em volta do `open` da prévia, que vira `menu.context(TextContext.of(kit))`.
+- No `KitPlaceholders`, os métodos `kit_*` passam a receber `@Context Kit kit` e
+  perdem o `current(...)`.
+- **Decisão à parte:** se os `{kit}`, `{uses}`... locais do `kits.yml` viram só
+  `%ravenessentials_kit_*%`, para uma sintaxe única. Depende de quanto o `kits.yml`
+  dos servidores já usa os locais.
 
 ---
 

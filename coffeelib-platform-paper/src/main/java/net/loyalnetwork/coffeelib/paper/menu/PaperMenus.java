@@ -47,7 +47,11 @@ public final class PaperMenus implements Listener {
         if (!owner.isEnabled() || !player.isOnline()) throw new IllegalStateException("Plugin disabled or player offline");
         Holder holder = new Holder(snapshot);
         // Legacy 1.8 clients support up to 32 characters in the inventory title.
-        String title = org.bukkit.ChatColor.translateAlternateColorCodes('&', snapshot.title());
+        // Placeholders first - CoffeeLib's with the menu's context, then PlaceholderAPI's - as
+        // the Forge and NeoForge menus do, then the colour codes.
+        String resolved = new net.loyalnetwork.coffeelib.paper.placeholder.PaperPlaceholderManager(owner, owner.getName())
+                .apply(player, snapshot.title(), snapshot.context());
+        String title = org.bukkit.ChatColor.translateAlternateColorCodes('&', resolved);
         if (title.length() > 32) throw new IllegalArgumentException("Inventory title exceeds the legacy 32-character limit");
         Inventory inventory = Bukkit.createInventory(holder, snapshot.rows() * 9, title);
         holder.inventory = inventory;

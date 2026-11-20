@@ -25,6 +25,11 @@ public final class PaperTextFormatter implements TextFormatter<String> {
     }
 
     @Override
+    public String parse(String text, Object player, net.loyalnetwork.coffeelib.api.placeholder.TextContext context) {
+        return parse(placeholders.apply(player, text, context));
+    }
+
+    @Override
     public String strip(String text) {
         return StyledText.parse(text).plain();
     }

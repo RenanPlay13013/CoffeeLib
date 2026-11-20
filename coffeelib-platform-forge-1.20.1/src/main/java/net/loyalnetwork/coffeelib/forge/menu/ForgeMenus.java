@@ -43,7 +43,7 @@ public final class ForgeMenus {
             contents.setItem(item.getKey(), item.getValue().stack().copy());
         SimpleMenuProvider provider = new SimpleMenuProvider(
                 (window, inventory, viewer) -> new LockedChestMenu(spec, window, inventory, contents, player),
-                new ForgeTextFormatter().parse(spec.title(), player));
+                new ForgeTextFormatter().parse(spec.title(), player, spec.context()));
         net.minecraftforge.network.NetworkHooks.openScreen(player, provider);
     }
 

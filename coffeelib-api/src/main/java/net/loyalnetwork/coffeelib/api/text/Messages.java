@@ -20,4 +20,17 @@ public interface Messages<T> {
 
     /** Sends to a command source or native platform sender/player. */
     void send(Object recipient, Function<T, String> template, Object... namesAndValues);
+
+    /**
+     * {@link #send(Object, Function, Object...)}, with {@code context} given to
+     * the {@code %namespace_key%} placeholders of the message. The
+     * {@code {name}} pairs are unaffected: they are this message's own ready
+     * values, while the context is for placeholders other mods resolve too.
+     * CoffeeLib's catalogs implement it; the default is for implementations
+     * from elsewhere.
+     */
+    default void send(Object recipient, net.loyalnetwork.coffeelib.api.placeholder.TextContext context,
+                      Function<T, String> template, Object... namesAndValues) {
+        throw new UnsupportedOperationException(getClass().getName() + " does not support text contexts");
+    }
 }

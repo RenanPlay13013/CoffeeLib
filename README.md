@@ -102,15 +102,15 @@ repositories {
 
 dependencies {
     // Paper
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-paper:3.10.1")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-paper:3.11")
     // Forge 1.20.1
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-forge-1.20.1:3.10.1")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-forge-1.20.1:3.11")
     // NeoForge 1.21.1
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-neoforge-1.21.1:3.10.1")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-neoforge-1.21.1:3.11")
     // Or just the format-agnostic core (config + DI, no platform backend)
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-core:3.10.1")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-core:3.11")
     // Or only the interfaces and annotations
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-api:3.10.1")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-api:3.11")
 }
 ```
 
@@ -799,6 +799,50 @@ String line = placeholders.apply(player, "You have %crates_keys% keys - %economy
   plugin's placeholders and expansions are dropped when it is disabled.
 * Operators can check one with `/coffeelib placeholder list` and
   `/coffeelib placeholder parse <text>` on Forge/NeoForge.
+
+
+### Placeholders about something: `TextContext`
+
+A text is often *about* something - a kit's icon, a crate's preview, a warp's
+message - and its placeholders need to know what. Say it where the text is
+built, and take it in the resolver with `@Context`:
+
+```java
+@Placeholder("kit_remaining")                         // %ravenessentials_kit_remaining%
+String remaining(ServerPlayer player, @Context Kit kit) { ... }
+
+TextContext about = TextContext.of(kit);
+formatter.parse(kit.iconName(), player, about);                     // a line of text
+placeholders.apply(player, text, about);                            // a plain string
+messages.send(player, about, m -> m.claimed, "uses", uses);         // a catalogue message
+menus.chest(3).title(preview.title()).context(about).locked().open(player);   // a menu title
+```
+
+* **Passed along, never stored**: the context travels with the call - no
+  `ThreadLocal` - so it holds on any thread and at any later time, including a
+  menu title the platform only reads when the menu opens.
+* **One value per class**, looked up by type (a subclass answers for its
+  superclass). `TextContext.of` refuses `null` and two values of one class;
+  `with(value)` adds one or replaces the one of its class. Keep the values
+  immutable: references are kept as given.
+* **Without the value the placeholder stays as written**, like a missing player.
+  So does it when two values would fit (a `@Context Named` with a warp and a home
+  both `Named`): it is left unresolved, with one warning in the log, rather than
+  guessing.
+* **Several types per method** are fine (`@Context Kit kit, @Context Crate crate`).
+  A `@Context` on a `String`, a primitive, `PlaceholderContext`, a player type, or
+  two of the same type, fails at registration with the method's name.
+* **Shared by every namespace** in the text: another mod's placeholder can read
+  the same `Kit` if it knows the class - intentionally. Resolvers registered with
+  a lambda see it through `PlaceholderContext.text()`.
+* **PlaceholderAPI has no context.** On Paper, CoffeeLib resolves its
+  placeholders first, with the context, and PlaceholderAPI then resolves the
+  rest; but a `@Context` placeholder reached *through* PlaceholderAPI - another
+  plugin's text, a scoreboard plugin - never resolves, since PlaceholderAPI only
+  knows the player. Neither does `/coffeelib placeholder parse`, which says so.
+* The `{name}` pairs of a message catalogue are unchanged: they are that
+  message's own values; the context is for placeholders other mods resolve too.
+* Paper menu titles now resolve placeholders too, as on Forge and NeoForge.
 
 ---
 

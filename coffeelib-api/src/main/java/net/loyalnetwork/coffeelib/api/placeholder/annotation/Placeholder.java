@@ -20,7 +20,8 @@ import java.lang.annotation.Target;
  * Parameters, in any order and all optional: the player in the platform's own
  * type (if the text has no player, or a different kind of one, the placeholder
  * is left unresolved instead of calling the method), a {@code String} for the
- * argument, a {@code PlaceholderContext} for everything. Any return type is
+ * argument, a {@code PlaceholderContext} for everything, and any number of
+ * {@link Context @Context} parameters for what the text is about. Any return type is
  * turned into text with {@code toString()}; {@code null} leaves the
  * placeholder unresolved.
  */

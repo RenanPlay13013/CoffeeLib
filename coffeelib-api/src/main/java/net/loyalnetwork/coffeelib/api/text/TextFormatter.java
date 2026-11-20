@@ -16,6 +16,15 @@ public interface TextFormatter<C> {
     /** Resolves registered placeholders for a player, then parses styling. */
     C parse(String text, Object player);
 
+    /**
+     * {@link #parse(String, Object)}, with {@code context} given to every
+     * placeholder resolver (see {@code TextContext}). CoffeeLib's formatters
+     * implement it; the default is for implementations from elsewhere.
+     */
+    default C parse(String text, Object player, net.loyalnetwork.coffeelib.api.placeholder.TextContext context) {
+        throw new UnsupportedOperationException(getClass().getName() + " does not support text contexts");
+    }
+
     /** Removes recognized style codes without removing ordinary ampersands. */
     String strip(String text);
 }
