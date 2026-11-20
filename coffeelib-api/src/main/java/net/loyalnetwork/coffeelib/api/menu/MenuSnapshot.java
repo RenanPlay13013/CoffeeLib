@@ -34,11 +34,25 @@ public final class MenuSnapshot<S, P> {
     /** What the menu is about; the platform resolves the title's placeholders with it on open. */
     public net.loyalnetwork.coffeelib.api.placeholder.TextContext context() { return context; }
 
-    /** The stack is a template, never a live player-inventory slot. */
-    public record Entry<S, P>(S stack, Consumer<MenuClick<P>> onClick) {
+    /**
+     * The stack is a template, never a live player-inventory slot.
+     *
+     * @param clicks the click types {@code onClick} is called for
+     */
+    public record Entry<S, P>(S stack, Consumer<MenuClick<P>> onClick, java.util.Set<MenuClickType> clicks) {
         public Entry {
             Objects.requireNonNull(stack, "stack");
             Objects.requireNonNull(onClick, "onClick");
+            clicks = java.util.Set.copyOf(Objects.requireNonNull(clicks, "clicks"));
+        }
+
+        /** Called on a plain left or right click, as before click types existed. */
+        public Entry(S stack, Consumer<MenuClick<P>> onClick) {
+            this(stack, onClick, MenuClickType.PRIMARY);
+        }
+
+        public boolean accepts(MenuClickType type) {
+            return clicks.contains(type);
         }
     }
 }

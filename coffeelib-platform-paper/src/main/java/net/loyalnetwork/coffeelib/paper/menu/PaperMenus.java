@@ -71,12 +71,14 @@ public final class PaperMenus implements Listener {
         // and clicks in the lower player inventory are all denied.
         event.setCancelled(true);
         if (!(event.getWhoClicked() instanceof Player player)) return;
-        if (event.getClick() != org.bukkit.event.inventory.ClickType.LEFT
-                && event.getClick() != org.bukkit.event.inventory.ClickType.RIGHT) return;
+        // By name: stable across Bukkit versions, and SWAP_OFFHAND does not exist on 1.8.
+        net.loyalnetwork.coffeelib.core.menu.MenuClicks.Decoded click =
+                net.loyalnetwork.coffeelib.core.menu.MenuClicks.bukkit(event.getClick().name(), event.getHotbarButton());
+        if (click == null) return;
         int slot = event.getRawSlot();
         if (slot < 0 || slot >= holder.snapshot.rows() * 9) return;
         MenuSnapshot.Entry<ItemStack, Player> entry = holder.snapshot.items().get(slot);
-        if (entry == null) return;
+        if (entry == null || !entry.accepts(click.type())) return;
         // Only one action can be pending for this menu. A client sending several
         // click packets in one tick must not duplicate a button action.
         if (holder.actionQueued) return;
@@ -86,7 +88,7 @@ public final class PaperMenus implements Listener {
         Bukkit.getScheduler().runTask(owner, () -> {
             holder.actionQueued = false;
             if (!owner.isEnabled() || !player.isOnline() || player.getOpenInventory().getTopInventory() != holder.inventory) return;
-            try { entry.onClick().accept(new MenuClick<>(player, slot)); }
+            try { entry.onClick().accept(new MenuClick<>(player, slot, click.type(), click.hotbarKey())); }
             catch (RuntimeException error) { owner.getLogger().log(java.util.logging.Level.SEVERE, "Menu click failed at slot " + slot, error); }
         });
     }

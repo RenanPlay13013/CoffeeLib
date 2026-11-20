@@ -102,15 +102,15 @@ repositories {
 
 dependencies {
     // Paper
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-paper:3.11")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-paper:3.12")
     // Forge 1.20.1
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-forge-1.20.1:3.11")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-forge-1.20.1:3.12")
     // NeoForge 1.21.1
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-neoforge-1.21.1:3.11")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-neoforge-1.21.1:3.12")
     // Or just the format-agnostic core (config + DI, no platform backend)
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-core:3.11")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-core:3.12")
     // Or only the interfaces and annotations
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-api:3.11")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-api:3.12")
 }
 ```
 
@@ -1689,10 +1689,13 @@ kits.open(serverPlayer);
   `.locked()` throws immediately. Unlocked menus and transferring items are not
   implemented yet. Items are display templates, cloned/copied into a fresh
   container for each player. No player inventory is used as menu storage.
-- Clicking the top inventory with the left or right mouse button runs the callback
-  **on the following server tick**. Shift-click, drag, number-key, drop,
-  double-click, and all item-moving operations are blocked. Player inventory
-  clicks are also blocked while a locked menu is open.
+- `item(slot, stack, callback)` runs the callback on a plain left or right click,
+  **on the following server tick**. To react to other clicks, give the types:
+  `item(slot, stack, Set.of(MenuClickType.SHIFT_LEFT, MenuClickType.RIGHT), click -> ...)`,
+  or `MenuClickType.ALL`; `click.type()` says which one happened (see *Click
+  types* below). Whatever the item answers, nothing is ever moved: drags,
+  shift-click transfers, number-key swaps, drops and double-click collection are
+  blocked, and so are player inventory clicks while a locked menu is open.
 - Only one callback may be pending per menu, preventing duplicate actions when
   several click packets arrive in the same server tick.
 - If the player leaves the menu before the callback executes, the callback is
@@ -1708,5 +1711,23 @@ kits.open(serverPlayer);
 - The menu intentionally uses the native chest screen. Adding input slots,
   real item transfers, special client-side animations, or fully custom menus
   requires a separate transactional design and is outside this initial API.
+
+**Click types** (`MenuClickType`, with `click.isLeft()`, `isRight()`, `isShift()`,
+`isMiddle()`):
+
+| Type | What the player did | Notes |
+|---|---|---|
+| `LEFT` / `RIGHT` | left / right click | the default for `item(...)` |
+| `SHIFT_LEFT` / `SHIFT_RIGHT` | Shift + left / right click | |
+| `MIDDLE` | middle click | **creative mode only**: in survival the client sends nothing |
+| `NUMBER_KEY` | a hotbar key over the slot | `click.hotbarKey()` is 1-9 |
+| `SWAP_OFFHAND` | the swap-hands key (F) | not on Minecraft 1.8 |
+| `DROP` / `CONTROL_DROP` | Q / Ctrl + Q | |
+| `DOUBLE_CLICK` | double click | unreliable: in a locked menu most clients send two `LEFT`s |
+
+**Ctrl + click does not exist on the server.** The Minecraft client sends it as a
+plain click, without the Ctrl, so no library can tell them apart; the only Ctrl
+the protocol carries is Ctrl + Q (`CONTROL_DROP`). On macOS, Ctrl + click is a
+right click. These limits are the client's, the same on Paper, Forge and NeoForge.
 
 **Architecture:** [DDD and Object Calisthenics guidelines](docs/architecture/ddd-object-calisthenics.md).

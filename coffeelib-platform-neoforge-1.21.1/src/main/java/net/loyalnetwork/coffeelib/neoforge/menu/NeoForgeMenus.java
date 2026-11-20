@@ -65,15 +65,17 @@ public final class NeoForgeMenus {
             // swaps, collection and carried-stack interactions on this container.
             // The client may predict a pickup; force the authoritative locked state back.
             broadcastFullState();
-            if (clickType != ClickType.PICKUP || (button != 0 && button != 1)) return;
+            net.loyalnetwork.coffeelib.core.menu.MenuClicks.Decoded click =
+                    net.loyalnetwork.coffeelib.core.menu.MenuClicks.vanilla(kind(clickType), button);
+            if (click == null) return;
             if (player != viewer || slot < 0 || slot >= spec.rows() * 9) return;
             MenuSnapshot.Entry<ItemStack, ServerPlayer> entry = spec.items().get(slot);
-            if (entry == null || actionQueued) return;
+            if (entry == null || !entry.accepts(click.type()) || actionQueued) return;
             actionQueued = true;
             scheduler.later(1, () -> {
                 actionQueued = false;
                 if (viewer.containerMenu != this || viewer.hasDisconnected()) return;
-                try { entry.onClick().accept(new MenuClick<>(viewer, slot)); }
+                try { entry.onClick().accept(new MenuClick<>(viewer, slot, click.type(), click.hotbarKey())); }
                 catch (RuntimeException error) { logger.log(Level.SEVERE, "Menu click failed in " + owner + " at " + slot, error); }
             });
         }
@@ -81,6 +83,19 @@ public final class NeoForgeMenus {
         @Override public ItemStack quickMoveStack(Player player, int slot) { return ItemStack.EMPTY; }
         @Override public boolean canDragTo(net.minecraft.world.inventory.Slot slot) { return false; }
         @Override public boolean canTakeItemForPickAll(ItemStack stack, net.minecraft.world.inventory.Slot slot) { return false; }
+    }
+
+    /** By constant, never by name(): Forge 1.20.1 obfuscates enum names in production. */
+    private static net.loyalnetwork.coffeelib.core.menu.MenuClicks.VanillaKind kind(ClickType type) {
+        return switch (type) {
+            case PICKUP -> net.loyalnetwork.coffeelib.core.menu.MenuClicks.VanillaKind.PICKUP;
+            case QUICK_MOVE -> net.loyalnetwork.coffeelib.core.menu.MenuClicks.VanillaKind.QUICK_MOVE;
+            case SWAP -> net.loyalnetwork.coffeelib.core.menu.MenuClicks.VanillaKind.SWAP;
+            case CLONE -> net.loyalnetwork.coffeelib.core.menu.MenuClicks.VanillaKind.CLONE;
+            case THROW -> net.loyalnetwork.coffeelib.core.menu.MenuClicks.VanillaKind.THROW;
+            case QUICK_CRAFT -> net.loyalnetwork.coffeelib.core.menu.MenuClicks.VanillaKind.QUICK_CRAFT;
+            case PICKUP_ALL -> net.loyalnetwork.coffeelib.core.menu.MenuClicks.VanillaKind.PICKUP_ALL;
+        };
     }
 
     private static MenuType<?> typeFor(int rows) {

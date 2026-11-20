@@ -102,15 +102,15 @@ repositories {
 
 dependencies {
     // Paper
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-paper:3.11")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-paper:3.12")
     // Forge 1.20.1
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-forge-1.20.1:3.11")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-forge-1.20.1:3.12")
     // NeoForge 1.21.1
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-neoforge-1.21.1:3.11")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-platform-neoforge-1.21.1:3.12")
     // Ou apenas o core agnóstico de formato (config + DI, sem backend de plataforma)
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-core:3.11")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-core:3.12")
     // Ou só as interfaces e anotações
-    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-api:3.11")
+    implementation("com.github.RenanPlay13013.CoffeeLib:coffeelib-api:3.12")
 }
 ```
 
@@ -1689,10 +1689,14 @@ kits.open(serverPlayer);
 - Apenas menus **bloqueados**: abrir sem `.locked()` lança erro imediatamente.
   Ainda não há slots editáveis nem movimentação de itens. O conteúdo é copiado
   para um inventário novo por jogador; itens de exposição não são itens reais.
-- Apenas clique esquerdo/direito normal nos itens superiores dispara ações,
-  **no tick seguinte**. Shift, arrasto, número do teclado, drop e clique duplo
-  são bloqueados. Durante o menu também são bloqueados cliques no inventário
-  inferior do jogador para impedir transferências acidentais.
+- `item(slot, stack, callback)` dispara a ação num clique esquerdo ou direito
+  normal, **no tick seguinte**. Para reagir a outros cliques, informe os tipos:
+  `item(slot, stack, Set.of(MenuClickType.SHIFT_LEFT, MenuClickType.RIGHT), click -> ...)`,
+  ou `MenuClickType.ALL`; `click.type()` diz qual aconteceu (veja *Tipos de
+  clique* abaixo). Seja qual for o clique aceito, nada é movido: arrasto,
+  transferência com Shift, troca pelo número do teclado, drop e coleta por clique
+  duplo continuam bloqueados, assim como os cliques no inventário inferior do
+  jogador durante o menu.
 - Apenas um callback pendente por menu; vários pacotes de clique no mesmo tick
   não duplicam a execução da ação.
 - Se o jogador fechar a tela antes do callback, a ação não executa. Exceções
@@ -1704,5 +1708,23 @@ kits.open(serverPlayer);
   aceita no máximo 32 caracteres, contando códigos de formatação.
 - Menus com slots de entrada, transferências reais e telas personalizadas
   continuam fora deste primeiro contrato por exigirem tratamento de transações.
+
+**Tipos de clique** (`MenuClickType`, com `click.isLeft()`, `isRight()`,
+`isShift()`, `isMiddle()`):
+
+| Tipo | O que o jogador fez | Observações |
+|---|---|---|
+| `LEFT` / `RIGHT` | clique esquerdo / direito | o padrão do `item(...)` |
+| `SHIFT_LEFT` / `SHIFT_RIGHT` | Shift + clique esquerdo / direito | |
+| `MIDDLE` | clique do meio | **só no modo criativo**: no sobrevivência o cliente não manda nada |
+| `NUMBER_KEY` | uma tecla da hotbar sobre o slot | `click.hotbarKey()` é 1-9 |
+| `SWAP_OFFHAND` | a tecla de trocar de mão (F) | não existe no Minecraft 1.8 |
+| `DROP` / `CONTROL_DROP` | Q / Ctrl + Q | |
+| `DOUBLE_CLICK` | clique duplo | pouco confiável: num menu bloqueado a maioria dos clientes manda dois `LEFT` |
+
+**Ctrl + clique não existe no servidor.** O cliente do Minecraft manda como um
+clique comum, sem o Ctrl, então nenhuma lib consegue diferenciar; o único Ctrl
+que o protocolo carrega é o Ctrl + Q (`CONTROL_DROP`). No macOS, Ctrl + clique é
+um clique direito. Esses limites são do cliente, iguais no Paper, Forge e NeoForge.
 
 **Arquitetura:** [Diretrizes de DDD e Object Calisthenics](docs/architecture/ddd-object-calisthenics.pt-BR.md).

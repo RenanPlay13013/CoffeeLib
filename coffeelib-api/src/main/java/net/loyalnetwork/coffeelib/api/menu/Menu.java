@@ -46,11 +46,26 @@ public final class Menu<S, P> {
         return this;
     }
 
-    /** Adds a display item with an optional action. A null action means no callback. */
+    /**
+     * Adds a display item with an optional action, called on a plain left or
+     * right click ({@link MenuClickType#PRIMARY}). A null action means no callback.
+     */
     public Menu<S, P> item(int slot, S stack, Consumer<MenuClick<P>> callback) {
+        return item(slot, stack, MenuClickType.PRIMARY, callback);
+    }
+
+    /**
+     * Adds a display item whose action is called for the click types in
+     * {@code clicks} - {@link MenuClickType#ALL} for any - and gets the type
+     * in {@link MenuClick#type()}. Other clicks on it are still blocked, just
+     * not reported. A null action means no callback.
+     */
+    public Menu<S, P> item(int slot, S stack, java.util.Set<MenuClickType> clicks, Consumer<MenuClick<P>> callback) {
         checkSlot(slot);
+        Objects.requireNonNull(clicks, "clicks");
+        if (clicks.isEmpty()) throw new IllegalArgumentException("An item needs at least one click type");
         items.put(slot, new MenuSnapshot.Entry<>(Objects.requireNonNull(stack, "stack"),
-                callback == null ? click -> { } : callback));
+                callback == null ? click -> { } : callback, clicks));
         return this;
     }
 
