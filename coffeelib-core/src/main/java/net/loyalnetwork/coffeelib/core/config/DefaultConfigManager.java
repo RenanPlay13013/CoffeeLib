@@ -57,6 +57,13 @@ public final class DefaultConfigManager implements ConfigManager {
         }
 
         Map<String, Object> raw = backend.read(path);
+        // Validate every field before touching the live instance. Otherwise a
+        // malformed later field leaves earlier fields modified even though reload
+        // fails, and consumers observe a partly applied configuration.
+        Object candidate = instantiate(config.getClass());
+        populate(candidate, model.getFields(), raw);
+        // Preserve the public contract: existing objects (including nested
+        // objects) retain their identity after a successful reload.
         populate(config, model.getFields(), raw);
         write(config, model.getFields(), path);
     }

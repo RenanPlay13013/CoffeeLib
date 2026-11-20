@@ -2,6 +2,8 @@ package net.loyalnetwork.coffeelib.core.config;
 
 import net.loyalnetwork.coffeelib.api.config.exception.ConfigLoadException;
 
+import java.math.BigDecimal;
+
 /** Converts between a field's declared Java type and the raw value a {@code ConfigBackend} works with. */
 final class FieldCodec {
 
@@ -19,34 +21,55 @@ final class FieldCodec {
             return decodeEnum(raw, targetType, key);
         }
         if (targetType == boolean.class || targetType == Boolean.class) {
-            return raw instanceof Boolean bool ? bool : Boolean.parseBoolean(raw.toString());
+            if (raw instanceof Boolean bool) return bool;
+            String text = raw.toString().trim();
+            if ("true".equalsIgnoreCase(text)) return true;
+            if ("false".equalsIgnoreCase(text)) return false;
+            throw new ConfigLoadException("Value '" + raw + "' is not a boolean for field '" + key + "'");
         }
         if (targetType == char.class || targetType == Character.class) {
             return decodeCharacter(raw, key);
         }
         if (raw instanceof Number number) {
-            if (targetType == byte.class || targetType == Byte.class) {
-                return number.byteValue();
-            }
-            if (targetType == int.class || targetType == Integer.class) {
-                return number.intValue();
-            }
-            if (targetType == long.class || targetType == Long.class) {
-                return number.longValue();
+            if (targetType == byte.class || targetType == Byte.class
+                    || targetType == short.class || targetType == Short.class
+                    || targetType == int.class || targetType == Integer.class
+                    || targetType == long.class || targetType == Long.class) {
+                return exactInteger(number, targetType, key);
             }
             if (targetType == double.class || targetType == Double.class) {
-                return number.doubleValue();
+                double value = number.doubleValue();
+                if (!Double.isFinite(value)) throw invalidNumber(number, targetType, key);
+                return value;
             }
             if (targetType == float.class || targetType == Float.class) {
-                return number.floatValue();
-            }
-            if (targetType == short.class || targetType == Short.class) {
-                return number.shortValue();
+                float value = number.floatValue();
+                if (!Float.isFinite(value)) throw invalidNumber(number, targetType, key);
+                return value;
             }
         }
 
         throw new ConfigLoadException("Cannot convert value '" + raw + "' (" + raw.getClass().getSimpleName()
                 + ") to " + targetType.getSimpleName() + " for field '" + key + "'");
+    }
+
+
+    /** Rejects overflow and fractional numbers instead of silently truncating them. */
+    private static Object exactInteger(Number number, Class<?> type, String key) {
+        try {
+            BigDecimal value = new BigDecimal(number.toString());
+            if (type == byte.class || type == Byte.class) return value.byteValueExact();
+            if (type == short.class || type == Short.class) return value.shortValueExact();
+            if (type == int.class || type == Integer.class) return value.intValueExact();
+            return value.longValueExact();
+        } catch (ArithmeticException | NumberFormatException ex) {
+            throw invalidNumber(number, type, key);
+        }
+    }
+
+    private static ConfigLoadException invalidNumber(Number number, Class<?> type, String key) {
+        return new ConfigLoadException("Value '" + number + "' cannot be represented exactly as "
+                + type.getSimpleName() + " for field '" + key + "'");
     }
 
     /**
