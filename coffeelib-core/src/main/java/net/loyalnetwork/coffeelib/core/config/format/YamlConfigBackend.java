@@ -94,7 +94,7 @@ public final class YamlConfigBackend implements ConfigBackend {
         for (Map.Entry<String, String> entry : comments.entrySet()) {
             String[] path = entry.getKey().split("\\.");
             String pad = INDENT_UNIT.repeat(path.length - 1);
-            int index = indexOfKeyLine(lines, pad + path[path.length - 1] + ":");
+            int index = indexOfPath(lines, path);
             if (index < 0) {
                 continue;
             }
@@ -123,13 +123,58 @@ public final class YamlConfigBackend implements ConfigBackend {
         return out.toString();
     }
 
-    /** Finds the first line starting with {@code target}, skipping the {@code # comment} lines themselves. */
-    private static int indexOfKeyLine(List<String> lines, String target) {
-        for (int i = 0; i < lines.size(); i++) {
-            if (lines.get(i).startsWith(target) && !lines.get(i).trim().startsWith("#")) {
+    /**
+     * The line of the key {@code path} names, found one segment at a time:
+     * each segment is looked for only inside the block of the one before it,
+     * so {@code preview.items} is the {@code items:} under {@code preview:},
+     * not the first {@code items:} in the file. {@code -1} when the path has
+     * no line (a section written inline, say).
+     */
+    static int indexOfPath(List<String> lines, String[] path) {
+        int from = 0;
+        int to = lines.size();
+        int found = -1;
+        for (int depth = 0; depth < path.length; depth++) {
+            found = indexOfKeyLine(lines, from, to, INDENT_UNIT.repeat(depth), path[depth]);
+            if (found < 0) {
+                return -1;
+            }
+            // The section's block: the lines after its key, up to the next line
+            // indented no deeper than the key itself.
+            from = found + 1;
+            to = endOfBlock(lines, found, depth * INDENT_UNIT.length());
+        }
+        return found;
+    }
+
+    /** The first line in {@code [from, to)} that is {@code key} at exactly {@code pad}, comments skipped. */
+    private static int indexOfKeyLine(List<String> lines, int from, int to, String pad, String key) {
+        for (int i = from; i < to; i++) {
+            String line = lines.get(i);
+            if (!line.startsWith(pad) || line.length() == pad.length() || line.charAt(pad.length()) == ' ') {
+                continue; // shallower, or deeper than this level
+            }
+            String rest = line.substring(pad.length());
+            if (rest.startsWith("#")) {
+                continue;
+            }
+            // SnakeYAML quotes keys it must, so a key can also appear as 'key': or "key":.
+            if (rest.startsWith(key + ":") || rest.startsWith("'" + key + "':") || rest.startsWith("\"" + key + "\":")) {
                 return i;
             }
         }
         return -1;
+    }
+
+    /** Where the block opened by the key at {@code keyLine} (indented {@code indent}) ends. */
+    private static int endOfBlock(List<String> lines, int keyLine, int indent) {
+        for (int i = keyLine + 1; i < lines.size(); i++) {
+            String line = lines.get(i);
+            int lineIndent = line.length() - line.stripLeading().length();
+            if (!line.isBlank() && lineIndent <= indent) {
+                return i;
+            }
+        }
+        return lines.size();
     }
 }
