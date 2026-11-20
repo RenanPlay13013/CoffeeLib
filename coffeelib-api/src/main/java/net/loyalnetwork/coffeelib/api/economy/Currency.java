@@ -51,11 +51,15 @@ public interface Currency {
     CompletableFuture<TransactionResult> set(UUID account, BigDecimal amount);
 
     /**
-     * Moves {@code amount} from one account to another: a withdrawal, then a
-     * deposit. If the deposit fails, the withdrawn amount is deposited back and
-     * the result is the deposit's failure. Not atomic in the database sense -
-     * the provider sees two operations - so a server stopping between the two
-     * can lose the amount in flight.
+     * Moves {@code amount} between distinct accounts <strong>only</strong> when
+     * the currency provider implements {@link AtomicTransferProvider}.
+     * CoffeeLib validates the amount and delegates the entire operation once
+     * to the same provider; it never emulates a transfer with withdraw/deposit.
+     * Returns {@link TransactionResult.Status#NOT_SUPPORTED} without touching
+     * either balance when the provider cannot guarantee atomicity.
+     * <p>
+     * This is intentionally stricter than the historical compensating-transfer
+     * behavior: an attempted refund cannot guarantee against a server crash.
      */
     CompletableFuture<TransactionResult> transfer(UUID from, UUID to, BigDecimal amount);
 }

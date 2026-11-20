@@ -4,6 +4,7 @@ import net.loyalnetwork.coffeelib.api.scheduler.Task;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.concurrent.CancellationException;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -133,6 +134,36 @@ class TickSchedulerTest {
 
         assertTrue(back.isCompletedExceptionally());
         assertEquals("closed", assertThrows(Exception.class, back::join).getCause().getMessage());
+    }
+
+    @Test
+    void stoppingFailsAFutureThatNeverCompletesInsteadOfLeavingItStranded() {
+        CompletableFuture<String> database = new CompletableFuture<>();
+        CompletableFuture<String> mainThreadResult = scheduler.onMain(database);
+
+        scheduler.stop();
+
+        assertTrue(mainThreadResult.isCompletedExceptionally());
+        assertThrows(CancellationException.class, mainThreadResult::join);
+        assertFalse(database.isDone(), "the original database call is separate");
+    }
+
+    @Test
+    void anOldWorldResultCannotCompleteOnTheNextWorldsTick() {
+        CompletableFuture<String> database = new CompletableFuture<>();
+        CompletableFuture<String> oldWorld = scheduler.onMain(database);
+        database.complete("previous world"); // queued, not on the server thread yet
+
+        scheduler.stop();
+        assertThrows(CancellationException.class, oldWorld::join);
+
+        CompletableFuture<String> nextDatabase = new CompletableFuture<>();
+        CompletableFuture<String> nextWorld = scheduler.onMain(nextDatabase);
+        nextDatabase.complete("next world");
+        tick();
+
+        assertEquals("next world", nextWorld.join());
+        assertThrows(CancellationException.class, oldWorld::join);
     }
 
     @Test

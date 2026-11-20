@@ -1,6 +1,7 @@
 package net.loyalnetwork.coffeelib.neoforge.commands;
 
 import net.loyalnetwork.coffeelib.api.command.CommandManager;
+import net.loyalnetwork.coffeelib.core.command.CommandServices;
 import net.loyalnetwork.coffeelib.core.command.CommandDefinition;
 import net.loyalnetwork.coffeelib.api.command.CommandArgument;
 import net.loyalnetwork.coffeelib.api.permission.PermissionDefault;
@@ -47,15 +48,17 @@ public final class NeoForgeCommandManager implements CommandManager {
     }
 
     @Override
-    public void register(Object handler) {
+    public synchronized void register(Object handler) {
+        CommandServices.wire(ownerId, handler);
         List<CommandDefinition> definitions = CommandScanner.scan(ownerId, handler, types);
         // Compiled once now so a tree Brigadier cannot build fails here, not at server start.
         for (CommandDefinition definition : definitions) {
             NeoForgeCommandCompiler.compile(definition);
         }
         // Duplicate paths are refused here, across this mod's handlers; roots across every owner.
-        paths.addAll(definitions);
+        paths.validateAddAll(definitions);
         CommandRoots.claim(ownerId, definitions);
+        paths.addAll(definitions);
 
         // A command's node is known to the permission system - and so to LuckPerms' editor -
         // with its @Permission default or the one its op level implies, unless its owner

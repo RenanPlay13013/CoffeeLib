@@ -4,75 +4,59 @@ import net.loyalnetwork.coffeelib.api.event.EventSubscription;
 import net.loyalnetwork.coffeelib.api.player.PlayerDirectory;
 import net.loyalnetwork.coffeelib.api.player.PlayerVisibility;
 
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import java.util.function.BiPredicate;
+import java.util.function.Supplier;
 
-/**
- * The one {@link PlayerDirectory} every owner on this CoffeeLib shares, so a
- * vanish mod's rule reaches every other mod's commands.
- */
+/** Shared directory facade; enumeration is an adapter concern, visibility a policy concern. */
 public final class SharedPlayers implements PlayerDirectory {
-
-    private static final Logger LOGGER = Logger.getLogger(SharedPlayers.class.getName());
     private static final SharedPlayers DIRECTORY = new SharedPlayers();
+    private final VisibilityPolicies policies = new VisibilityPolicies();
+    private volatile Supplier<? extends Collection<?>> onlinePlayers;
 
-    private final List<Rule> rules = new CopyOnWriteArrayList<>();
+    private SharedPlayers() { }
 
-    private SharedPlayers() {
+    public static PlayerDirectory directory() { return DIRECTORY; }
+
+    public static void configureOnlinePlayers(Supplier<? extends Collection<?>> online,
+                                              BiPredicate<Object, Object> nativeVisibility) {
+        DIRECTORY.onlinePlayers = Objects.requireNonNull(online, "online");
+        DIRECTORY.policies.configure(nativeVisibility);
     }
 
-    public static PlayerDirectory directory() {
-        return DIRECTORY;
+    @Override public EventSubscription visibility(PlayerVisibility rule) {
+        return policies.register(null, rule);
     }
 
-    @Override
-    public EventSubscription visibility(PlayerVisibility rule) {
-        Rule added = new Rule(Objects.requireNonNull(rule, "rule"));
-        rules.add(added);
-        return added;
+    @Override public EventSubscription visibility(String ownerId, PlayerVisibility rule) {
+        if (Objects.requireNonNull(ownerId, "ownerId").isBlank()) {
+            throw new IllegalArgumentException("Visibility owner id cannot be blank");
+        }
+        return policies.register(ownerId, rule);
     }
 
-    @Override
-    public boolean canSee(Object viewer, Object target) {
-        if (viewer == null || viewer == target) {
-            return true;
-        }
-        for (Rule rule : rules) {
-            try {
-                if (!rule.visibility.canSee(viewer, target)) {
-                    return false;
-                }
-            } catch (RuntimeException e) {
-                // A broken rule hides no one.
-                LOGGER.log(Level.SEVERE, "[CoffeeLib] A player visibility rule failed; treating the player as visible", e);
-            }
-        }
-        return true;
+    public static void releaseOwner(String ownerId) { DIRECTORY.policies.releaseOwner(ownerId); }
+    public static void clearAll() {
+        DIRECTORY.policies.clear();
+        // Release the platform enumerator too: it can capture plugin/server objects.
+        DIRECTORY.onlinePlayers = null;
     }
 
-    private final class Rule implements EventSubscription {
-        final PlayerVisibility visibility;
+    @Override public boolean canSee(Object viewer, Object target) { return policies.canSee(viewer, target); }
 
-        Rule(PlayerVisibility visibility) {
-            this.visibility = visibility;
+    @Override public List<Object> visibleTo(Object viewer) {
+        Supplier<? extends Collection<?>> source = onlinePlayers;
+        if (source == null) {
+            throw new IllegalStateException("CoffeeLib player directory has not been initialized by the platform");
         }
-
-        @Override
-        public Class<?> eventType() {
-            return PlayerVisibility.class;
+        Collection<?> online = Objects.requireNonNull(source.get(), "online players collection");
+        List<Object> visible = new ArrayList<>();
+        for (Object player : online) {
+            if (player != null && canSee(viewer, player)) visible.add(player);
         }
-
-        @Override
-        public boolean isActive() {
-            return rules.contains(this);
-        }
-
-        @Override
-        public void unsubscribe() {
-            rules.remove(this);
-        }
+        return List.copyOf(visible);
     }
 }

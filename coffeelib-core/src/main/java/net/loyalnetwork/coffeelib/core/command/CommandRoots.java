@@ -51,6 +51,17 @@ public final class CommandRoots {
         }
     }
 
+    /**
+     * Removes an owner's claims after its plugin is disabled. Without this,
+     * a future plugin owner can be refused because a previous classloader's
+     * replacement claim is still in the process-wide registry.
+     */
+    public static synchronized void releaseOwner(String ownerId) {
+        OWNERS.values().forEach(owners -> owners.remove(ownerId));
+        OWNERS.entrySet().removeIf(entry -> entry.getValue().isEmpty());
+        REPLACERS.entrySet().removeIf(entry -> entry.getValue().equals(ownerId));
+    }
+
     /** Whether some owner's command replaces whatever else is under {@code root}. */
     public static synchronized boolean isReplaced(String root) {
         return REPLACERS.containsKey(root);

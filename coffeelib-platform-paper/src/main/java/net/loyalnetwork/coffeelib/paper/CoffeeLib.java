@@ -1,6 +1,13 @@
 package net.loyalnetwork.coffeelib.paper;
 
 import net.loyalnetwork.coffeelib.api.config.ConfigFormat;
+import net.loyalnetwork.coffeelib.api.text.Messages;
+import net.loyalnetwork.coffeelib.api.text.TextFormatter;
+import net.loyalnetwork.coffeelib.core.text.MessageCatalogs;
+import net.loyalnetwork.coffeelib.paper.text.PaperTextFormatter;
+import net.loyalnetwork.coffeelib.api.command.CommandSource;
+import org.bukkit.command.CommandSender;
+import org.bukkit.entity.Player;
 import net.loyalnetwork.coffeelib.api.config.ReloadableConfigManager;
 import net.loyalnetwork.coffeelib.api.command.CommandManager;
 import net.loyalnetwork.coffeelib.api.event.EventBus;
@@ -9,6 +16,9 @@ import net.loyalnetwork.coffeelib.api.economy.EconomyManager;
 import net.loyalnetwork.coffeelib.api.permission.PermissionManager;
 import net.loyalnetwork.coffeelib.api.player.PlayerDirectory;
 import net.loyalnetwork.coffeelib.api.scheduler.Scheduler;
+import net.loyalnetwork.coffeelib.api.di.ServiceContainer;
+import net.loyalnetwork.coffeelib.core.di.SharedServices;
+import net.loyalnetwork.coffeelib.core.di.PlatformServices;
 import net.loyalnetwork.coffeelib.core.player.SharedPlayers;
 import net.loyalnetwork.coffeelib.paper.scheduler.PaperScheduler;
 import net.loyalnetwork.coffeelib.core.economy.SharedEconomy;
@@ -64,6 +74,7 @@ public final class CoffeeLib {
      * ({@code /yourplugin:crate}). No {@code plugin.yml} entry is needed.
      */
     public static CommandManager commands(JavaPlugin plugin) {
+        services(plugin);
         return new PaperCommandManager(plugin);
     }
 
@@ -149,6 +160,22 @@ public final class CoffeeLib {
         return SharedPlayers.directory();
     }
 
+    /** Create safe, read-only chest menus for this plugin, including Spigot 1.8.8. */
+    public static net.loyalnetwork.coffeelib.paper.menu.PaperMenus menus(JavaPlugin plugin) {
+        return net.loyalnetwork.coffeelib.paper.menu.PaperMenus.forPlugin(plugin);
+    }
+
+    /** Persistent player values using native PDC on Bukkit 1.14+. Fails explicitly on older servers. */
+    public static net.loyalnetwork.coffeelib.api.player.PlayerDataFactory playerData(JavaPlugin plugin) {
+        return net.loyalnetwork.coffeelib.paper.player.PaperPlayerDataFactory.forPlugin(plugin);
+    }
+
+    /** One service registry per plugin; shared by its command and event handlers. */
+    public static ServiceContainer services(JavaPlugin plugin) {
+        return SharedServices.forOwner(plugin.getName(), () -> new PlatformServices(
+                permissions(plugin), scheduler(plugin), database(plugin), players()));
+    }
+
     /**
      * The CoffeeLib event bus, as a handle bound to {@code plugin}.
      * <p>
@@ -167,6 +194,27 @@ public final class CoffeeLib {
      * {@link SharedEventBus}.
      */
     public static EventBus eventBus(JavaPlugin plugin) {
+        services(plugin);
         return SharedEventBus.forOwner(plugin.getName());
+    }
+    /** Legacy-compatible text formatter, including PlaceholderAPI when installed. */
+    public static TextFormatter<String> text(JavaPlugin plugin) {
+        return new PaperTextFormatter(placeholders(plugin));
+    }
+
+    /** Loads a reloadable message catalog in the plugin's own data directory. */
+    public static <T> Messages<T> messages(JavaPlugin plugin, Class<T> catalogType) {
+        TextFormatter<String> formatter = text(plugin);
+        Scheduler main = scheduler(plugin);
+        return MessageCatalogs.open(plugin.getName(), plugin.getDataFolder().toPath(), catalogType,
+                (recipient, message) -> main.onMain(() -> {
+                    if (!plugin.isEnabled()) return;
+                    Object nativeRecipient = recipient instanceof CommandSource source ? source.unwrap() : recipient;
+                    if (!(nativeRecipient instanceof CommandSender sender)) {
+                        throw new IllegalArgumentException("Unsupported Paper message recipient: " + nativeRecipient.getClass());
+                    }
+                    if (sender instanceof Player player && !player.isOnline()) return;
+                    sender.sendMessage(formatter.parse(message, sender instanceof Player ? sender : null));
+                }));
     }
 }

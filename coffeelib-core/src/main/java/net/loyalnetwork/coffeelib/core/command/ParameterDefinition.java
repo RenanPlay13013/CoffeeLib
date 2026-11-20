@@ -203,9 +203,12 @@ public final class ParameterDefinition {
 
     private static void addAll(Set<String> target, Collection<String> values) {
         if (values != null) {
-            for (String value : values) {
-                if (value != null) {
-                    target.add(value);
+            // Raw collections and unchecked casts may still reach us from
+            // third-party plugins. Ignore invalid elements rather than
+            // throwing out of the tab-completion handler.
+            for (Object value : values) {
+                if (value instanceof String text) {
+                    target.add(text);
                 }
             }
         }

@@ -7,6 +7,8 @@ import net.loyalnetwork.coffeelib.api.command.exception.CommandException;
 import net.loyalnetwork.coffeelib.core.command.ArgumentTypes;
 import net.loyalnetwork.coffeelib.core.player.SharedPlayers;
 import org.bukkit.Bukkit;
+import org.bukkit.Location;
+import org.bukkit.command.BlockCommandSender;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
 
@@ -27,14 +29,16 @@ final class PaperArguments {
         types.register(Player.class, new PlayerArgument());
         types.markPlayer(Player.class);
         types.register(World.class, new WorldArgument());
+        types.register(Location.class, new LocationArgument());
     }
 
-    /** CoffeeLib's visibility rules and Bukkit's own {@code canSee}, both. */
+    /**
+     * The shared directory already checks Bukkit's native visibility predicate.
+     * Do not call Player.canSee a second time here: the shared directory
+     * handles platform exceptions by denying access rather than exposing names.
+     */
     static boolean visible(Object viewer, Player target) {
-        if (!SharedPlayers.directory().canSee(viewer, target)) {
-            return false;
-        }
-        return !(viewer instanceof Player player) || player == target || player.canSee(target);
+        return SharedPlayers.directory().canSee(viewer, target);
     }
 
     /** An online player by exact name, among those the sender may see. */
@@ -59,6 +63,56 @@ final class PaperArguments {
                 }
             }
             return names;
+        }
+    }
+
+    /**
+     * Coordinates are three command words, relative to the sender's location
+     * when prefixed with '~'. A console has no location, and gets a clear error.
+     * Block command senders can also supply their block's position.
+     */
+    static final class LocationArgument implements CommandArgument<Location> {
+        @Override
+        public int words() {
+            return 3;
+        }
+
+        @Override
+        public Location parse(CommandSource source, String input) {
+            Location base;
+            if (source != null && source.player() instanceof Player player) {
+                base = player.getLocation();
+            } else if (source != null && source.unwrap() instanceof BlockCommandSender block) {
+                base = block.getBlock().getLocation();
+            } else {
+                throw new CommandException("Coordinates require a player or command block sender.");
+            }
+            String[] values = input.trim().split("\\s+");
+            if (values.length != 3) {
+                throw new CommandException("'" + input + "' is not three coordinates.");
+            }
+            double[] origin = {base.getX(), base.getY(), base.getZ()};
+            double[] coords = new double[3];
+            for (int i = 0; i < 3; i++) {
+                String value = values[i];
+                try {
+                    coords[i] = value.startsWith("~")
+                            ? origin[i] + (value.length() == 1 ? 0 : Double.parseDouble(value.substring(1)))
+                            : Double.parseDouble(value);
+                    if (!Double.isFinite(coords[i])) {
+                        throw new NumberFormatException("Non-finite coordinate");
+                    }
+                } catch (NumberFormatException e) {
+                    throw new CommandException("'" + value + "' is not a coordinate.");
+                }
+            }
+            return new Location(base.getWorld(), coords[0], coords[1], coords[2],
+                    base.getYaw(), base.getPitch());
+        }
+
+        @Override
+        public Collection<String> suggest(SuggestContext context) {
+            return context.tokenIndex() < 3 ? List.of("~", "~1", "~-1") : List.of();
         }
     }
 

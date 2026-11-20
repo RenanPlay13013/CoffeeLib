@@ -13,9 +13,9 @@ import net.loyalnetwork.coffeelib.api.di.exception.MissingProviderException;
  * deferring resolution. Keeping providers registered before their consumers
  * are wired is the caller's responsibility.
  * <p>
- * Platform-agnostic and stateless beyond its own registry — unlike
- * {@code ConfigManager}, there's nothing platform-specific to bind to, so a
- * container isn't obtained through a platform entry point.
+ * On its own this interface is platform-agnostic. On Minecraft platforms,
+ * {@code CoffeeLib.services(owner)} returns the shared container for that
+ * owner, already provisioned with platform services. Both forms are valid.
  */
 public interface ServiceContainer {
 
@@ -33,6 +33,8 @@ public interface ServiceContainer {
      *
      * @throws AmbiguousProviderException if a field names no provider but more than one is registered for its type
      * @throws MissingProviderException   if no registered provider matches a field's type (and name, if given)
+     * <p>Fields are resolved before any injection is applied; missing providers
+     * leave the receiver unchanged. Non-static, non-final fields are required.
      */
     void wire(Object receiverHost);
 }

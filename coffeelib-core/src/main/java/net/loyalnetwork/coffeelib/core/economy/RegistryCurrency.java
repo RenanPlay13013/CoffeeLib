@@ -1,5 +1,6 @@
 package net.loyalnetwork.coffeelib.core.economy;
 
+import net.loyalnetwork.coffeelib.api.economy.AtomicTransferProvider;
 import net.loyalnetwork.coffeelib.api.economy.Currency;
 import net.loyalnetwork.coffeelib.api.economy.CurrencyProvider;
 import net.loyalnetwork.coffeelib.api.economy.TransactionResult;
@@ -18,8 +19,8 @@ import java.util.logging.Logger;
 /**
  * A {@link Currency} handle: looks its provider up on every call, so it
  * follows providers registering, leaving and coming back. Its own logic is
- * the channel's only - amount checks, and a transfer built from the
- * provider's withdraw and deposit; the balances are the provider's.
+ * the channel's only - amount checks and a single dispatch to an atomic
+ * provider for transfers. Balances and transaction boundaries belong to the provider.
  */
 final class RegistryCurrency implements Currency {
 
@@ -104,24 +105,14 @@ final class RegistryCurrency implements Currency {
             return CompletableFuture.completedFuture(
                     TransactionResult.failure(Status.INVALID_AMOUNT, "Cannot transfer to the same account"));
         }
-        return withdraw(from, amount).thenCompose(withdrawn -> {
-            if (!withdrawn.succeeded()) {
-                return CompletableFuture.completedFuture(withdrawn);
+        return transact(from, amount, false, provider -> {
+            if (!(provider instanceof AtomicTransferProvider atomicProvider)) {
+                return CompletableFuture.completedFuture(TransactionResult.failure(Status.NOT_SUPPORTED,
+                        "Currency '" + id + "' does not support atomic transfers"));
             }
-            return deposit(to, amount).thenCompose(deposited -> {
-                if (deposited.succeeded()) {
-                    return CompletableFuture.completedFuture(withdrawn); // the payer's balance, as a payer expects
-                }
-                // Give it back, and report why the transfer did not happen.
-                return deposit(from, amount).thenApply(refunded -> {
-                    if (!refunded.succeeded()) {
-                        LOGGER.severe("[CoffeeLib] Transfer of " + amount + " " + id + " from " + from + " to " + to
-                                + " failed on the deposit, and refunding " + from + " failed too ("
-                                + refunded.message() + "); the amount is lost");
-                    }
-                    return deposited;
-                });
-            });
+            // One provider instance and one operation: never withdraw first and
+            // hope a compensating deposit will repair a failed transfer.
+            return atomicProvider.transfer(from, to, amount);
         });
     }
 
@@ -149,7 +140,9 @@ final class RegistryCurrency implements Currency {
         if (invalid != null) {
             return CompletableFuture.completedFuture(TransactionResult.failure(Status.INVALID_AMOUNT, invalid));
         }
-        return callProvider(provider.get(), call).exceptionally(error -> {
+        return callProvider(provider.get(), call).thenApply(result -> result != null ? result
+                : TransactionResult.failure(Status.FAILED, "Currency '" + id + "' returned no transaction result"))
+                .exceptionally(error -> {
             Throwable cause = error instanceof java.util.concurrent.CompletionException && error.getCause() != null
                     ? error.getCause() : error;
             LOGGER.log(Level.WARNING, "[CoffeeLib] The provider of '" + id + "' failed", cause);
@@ -169,15 +162,9 @@ final class RegistryCurrency implements Currency {
         }
     }
 
+    /** Kept for existing package-local callers. Monetary invariants live in their own policy. */
     static String invalidAmount(BigDecimal amount, int fractionalDigits, boolean zeroAllowed) {
-        int sign = amount.signum();
-        if (sign < 0 || (sign == 0 && !zeroAllowed)) {
-            return "Amount must be " + (zeroAllowed ? "zero or more" : "more than zero") + ", not " + amount.toPlainString();
-        }
-        if (amount.stripTrailingZeros().scale() > Math.max(fractionalDigits, 0)) {
-            return "Amount " + amount.toPlainString() + " has more than " + fractionalDigits + " decimal place(s)";
-        }
-        return null;
+        return new MoneyAmountPolicy(fractionalDigits, zeroAllowed).invalidReason(amount);
     }
 
     private CoffeeLibException noProvider() {

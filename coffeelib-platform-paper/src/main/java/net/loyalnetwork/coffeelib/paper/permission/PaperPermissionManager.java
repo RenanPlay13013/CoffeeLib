@@ -12,6 +12,8 @@ import org.bukkit.plugin.PluginManager;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.util.UUID;
+import net.loyalnetwork.coffeelib.core.permission.PermissionNumbers;
+import org.bukkit.entity.Player;
 
 /**
  * Paper's permission manager: Bukkit's own permission system decides.
@@ -51,6 +53,35 @@ public final class PaperPermissionManager extends DefaultPermissionManager {
     @Override
     public boolean has(Object subject, String node) {
         return check(subject, node);
+    }
+
+    @Override
+    public int number(Object subject, String prefix, int fallback) {
+        PermissionNumbers.requirePrefix(prefix);
+        Object unwrapped = subject instanceof CommandSource source ? source.unwrap() : subject;
+        if (unwrapped instanceof Player player && player.isOnline()
+                && plugin.getServer().getPluginManager().isPluginEnabled("LuckPerms")) {
+            Integer fromLuckPerms = LuckPermsNumberBridge.number(player, prefix);
+            if (fromLuckPerms != null) return fromLuckPerms;
+        }
+        return super.number(subject, prefix, fallback);
+    }
+
+    /** Optional dependency behind an inner class, never loaded without LuckPerms. */
+    private static final class LuckPermsNumberBridge {
+        static Integer number(Player player, String prefix) {
+            net.luckperms.api.LuckPerms api;
+            try { api = net.luckperms.api.LuckPermsProvider.get(); }
+            catch (IllegalStateException notReady) { return null; }
+            try {
+                var adapter = api.getPlayerAdapter(Player.class);
+                Integer meta = PermissionNumbers.parse(adapter.getMetaData(player).getMetaValue(prefix));
+                return meta != null ? meta
+                        : PermissionNumbers.highestGranted(prefix, adapter.getPermissionData(player).getPermissionMap());
+            } catch (IllegalStateException | IllegalArgumentException notTracked) {
+                return null;
+            }
+        }
     }
 
     @Override

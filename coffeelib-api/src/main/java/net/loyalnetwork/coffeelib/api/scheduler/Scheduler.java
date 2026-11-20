@@ -56,8 +56,13 @@ public interface Scheduler {
 
     /**
      * {@code future}, completing on the main thread: what is chained on the
-     * returned future runs there, so it may touch the world. The result or
-     * failure is the same as {@code future}'s.
+     * returned future runs there, so it may touch the world. Normally the result
+     * or failure is the same as {@code future}'s. On Forge/NeoForge, stopping
+     * the server first completes the returned future exceptionally with
+     * {@link java.util.concurrent.CancellationException}; an unfinished result
+     * from an old world must not resume on a new integrated server. On Paper,
+     * the same cancellation applies when CoffeeLib observes the owning plugin
+     * being disabled.
      */
     <T> CompletableFuture<T> onMain(CompletableFuture<T> future);
 }

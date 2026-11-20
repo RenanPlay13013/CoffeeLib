@@ -1,6 +1,14 @@
 package net.loyalnetwork.coffeelib.forge;
 
 import net.loyalnetwork.coffeelib.api.config.ConfigFormat;
+import net.loyalnetwork.coffeelib.api.text.Messages;
+import net.loyalnetwork.coffeelib.api.text.TextFormatter;
+import net.loyalnetwork.coffeelib.core.text.MessageCatalogs;
+import net.loyalnetwork.coffeelib.forge.text.ForgeTextFormatter;
+import net.loyalnetwork.coffeelib.api.command.CommandSource;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.network.chat.MutableComponent;
 import net.loyalnetwork.coffeelib.api.config.ReloadableConfigManager;
 import net.loyalnetwork.coffeelib.api.command.CommandManager;
 import net.loyalnetwork.coffeelib.api.event.EventBus;
@@ -9,6 +17,9 @@ import net.loyalnetwork.coffeelib.api.economy.EconomyManager;
 import net.loyalnetwork.coffeelib.api.permission.PermissionManager;
 import net.loyalnetwork.coffeelib.api.player.PlayerDirectory;
 import net.loyalnetwork.coffeelib.api.scheduler.Scheduler;
+import net.loyalnetwork.coffeelib.api.di.ServiceContainer;
+import net.loyalnetwork.coffeelib.core.di.SharedServices;
+import net.loyalnetwork.coffeelib.core.di.PlatformServices;
 import net.loyalnetwork.coffeelib.core.player.SharedPlayers;
 import net.loyalnetwork.coffeelib.core.scheduler.TickSchedulers;
 import net.loyalnetwork.coffeelib.core.economy.SharedEconomy;
@@ -145,7 +156,22 @@ public final class CoffeeLib {
 
     /** {@link #commands()} for when the mod id is given explicitly. */
     public static CommandManager commands(String modId) {
+        services(modId);
         return new ForgeCommandManager(modId);
+    }
+
+    /** Read-only vanilla chest menus; requires the server thread. */
+    public static net.loyalnetwork.coffeelib.forge.menu.ForgeMenus menus(String modId) {
+        return new net.loyalnetwork.coffeelib.forge.menu.ForgeMenus(modId, scheduler(modId));
+    }
+
+    public static net.loyalnetwork.coffeelib.forge.menu.ForgeMenus menus() {
+        return menus(ModLoadingContext.get().getActiveNamespace());
+    }
+
+    /** Persistent values stored in the CoffeeLib native Forge capability. */
+    public static net.loyalnetwork.coffeelib.api.player.PlayerDataFactory playerData(String modId) {
+        return net.loyalnetwork.coffeelib.forge.player.ForgePlayerDataFactory.forOwner(modId);
     }
 
     /**
@@ -251,7 +277,18 @@ public final class CoffeeLib {
 
     /** {@link PermissionManager} for {@code modId}. */
     public static PermissionManager permissions(String modId) {
-        return new DefaultPermissionManager(modId, ForgePermissions.resolver());
+        return new DefaultPermissionManager(modId, ForgePermissions.resolver(), ForgePermissions::number);
+    }
+
+    /** One service registry for the calling mod. Requires an active mod-loading context. */
+    public static ServiceContainer services() {
+        return services(ModLoadingContext.get().getActiveNamespace());
+    }
+
+    /** One service registry per owner, shared with its command and event handlers. */
+    public static ServiceContainer services(String modId) {
+        return SharedServices.forOwner(modId, () -> new PlatformServices(
+                permissions(modId), scheduler(modId), database(modId), players()));
     }
 
     public static EventBus eventBus() {
@@ -266,6 +303,7 @@ public final class CoffeeLib {
      *              recorded against, and the one {@code unregisterAll()} clears
      */
     public static EventBus eventBus(String modId) {
+        services(modId);
         return SharedEventBus.forOwner(modId);
     }
 
@@ -280,5 +318,39 @@ public final class CoffeeLib {
      */
     private static Path configDirectory() {
         return FMLPaths.CONFIGDIR.get();
+    }
+    /** Native Minecraft text with RGB, formatting, and shared placeholders. */
+    public static TextFormatter<MutableComponent> text() { return new ForgeTextFormatter(); }
+
+    /** Text formatter that can be obtained outside the mod constructor. */
+    public static TextFormatter<MutableComponent> text(String modId) { return text(); }
+
+    /** Owner-bound, reloadable message catalog; safe to create outside the mod constructor. */
+    public static <T> Messages<T> messages(Class<T> catalogType) {
+        return messages(ModLoadingContext.get().getActiveNamespace(), catalogType);
+    }
+
+    /** Uses managed YAML by default; keeps core independent of Minecraft. */
+    public static <T> Messages<T> messages(String modId, Class<T> catalogType) {
+        TextFormatter<MutableComponent> formatter = new ForgeTextFormatter();
+        Scheduler main = scheduler(modId);
+        return MessageCatalogs.open(modId, configDirectory().resolve(modId), catalogType,
+                (recipient, message) -> main.onMain(() -> {
+                    Object nativeRecipient = recipient instanceof CommandSource source ? source.unwrap() : recipient;
+                    if (nativeRecipient instanceof CommandSourceStack stack) {
+                        ServerPlayer player = stack.getPlayer();
+                        if (player == null || !player.hasDisconnected()) {
+                            stack.sendSystemMessage(formatter.parse(message, player));
+                        }
+                        return;
+                    }
+                    if (nativeRecipient instanceof ServerPlayer player) {
+                        if (!player.hasDisconnected()) {
+                            player.sendSystemMessage(formatter.parse(message, player));
+                        }
+                        return;
+                    }
+                    throw new IllegalArgumentException("Unsupported Forge message recipient: " + nativeRecipient.getClass());
+                }));
     }
 }

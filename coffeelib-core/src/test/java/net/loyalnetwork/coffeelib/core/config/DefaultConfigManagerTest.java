@@ -99,6 +99,48 @@ class DefaultConfigManagerTest {
         assertEquals("easy", config.difficulty);
     }
 
+    @Test
+    void failedReloadDoesNotChangeAnyLiveFields(@TempDir Path tempDir) {
+        InMemoryConfigBackend backend = new InMemoryConfigBackend();
+        ConfigManager manager = new DefaultConfigManager(tempDir, backend);
+        ServerConfig config = manager.load(ServerConfig.class);
+        backend.write(tempDir.resolve("server.mem"), Map.of(
+                "host", "new-but-invalid.example", "port", 99999), Map.of());
+
+        assertThrows(ConfigValidationException.class, () -> manager.reload(config));
+        assertEquals("localhost", config.host, "a failed reload must not apply earlier fields");
+        assertEquals(3306, config.port);
+    }
+
+    @Test
+    void malformedBooleanIsRejectedRatherThanSilentlyBecomingFalse() {
+        assertThrows(net.loyalnetwork.coffeelib.api.config.exception.ConfigLoadException.class,
+                () -> FieldCodec.decode("treu", boolean.class, "enabled"));
+        assertEquals(true, FieldCodec.decode("TRUE", boolean.class, "enabled"));
+        assertEquals(false, FieldCodec.decode("false", boolean.class, "enabled"));
+    }
+
+    @Test
+    void integerFieldsRejectOverflowAndFractionalInput(@TempDir Path tempDir) {
+        InMemoryConfigBackend backend = new InMemoryConfigBackend();
+        ConfigManager manager = new DefaultConfigManager(tempDir, backend);
+        Path path = tempDir.resolve("server.mem");
+
+        backend.write(path, Map.of("port", 4294967297L), Map.of());
+        assertThrows(net.loyalnetwork.coffeelib.api.config.exception.ConfigLoadException.class,
+                () -> manager.load(ServerConfig.class));
+
+        backend.write(path, Map.of("port", 1.5d), Map.of());
+        assertThrows(net.loyalnetwork.coffeelib.api.config.exception.ConfigLoadException.class,
+                () -> manager.load(ServerConfig.class));
+
+        assertEquals(2, FieldCodec.decode(2.0d, int.class, "port"));
+        assertThrows(net.loyalnetwork.coffeelib.api.config.exception.ConfigLoadException.class,
+                () -> FieldCodec.decode(256, byte.class, "small"));
+        assertThrows(net.loyalnetwork.coffeelib.api.config.exception.ConfigLoadException.class,
+                () -> FieldCodec.decode(Double.NaN, double.class, "fraction"));
+    }
+
     public static final class CredentialsConfig {
         public String username = "root";
         public String password = "changeme";
@@ -164,6 +206,24 @@ class DefaultConfigManagerTest {
         assertEquals(6543, config.database.port);
         assertEquals("admin", config.database.credentials.username);
         assertTrue(config.database == originalDatabase, "nested instance should be reused, not replaced");
+    }
+
+    @Test
+    void invalidNestedReloadPreservesAllExistingObjectsAndValues(@TempDir Path tempDir) {
+        InMemoryConfigBackend backend = new InMemoryConfigBackend();
+        ConfigManager manager = new DefaultConfigManager(tempDir, backend);
+        AppConfig config = manager.load(AppConfig.class);
+        DatabaseConfig original = config.database;
+        backend.write(tempDir.resolve("app.mem"), Map.of(
+                "name", "unexpected",
+                "database", Map.of("host", "unexpected-host", "port", 70000)
+        ), Map.of());
+
+        assertThrows(ConfigValidationException.class, () -> manager.reload(config));
+        assertEquals("coffee", config.name);
+        assertTrue(original == config.database);
+        assertEquals("db.local", config.database.host);
+        assertEquals(5432, config.database.port);
     }
 
     public static final class SelfReferencing {

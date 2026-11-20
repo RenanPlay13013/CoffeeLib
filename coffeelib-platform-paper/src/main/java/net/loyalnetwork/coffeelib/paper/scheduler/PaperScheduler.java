@@ -7,7 +7,11 @@ import org.bukkit.plugin.Plugin;
 import org.bukkit.scheduler.BukkitTask;
 
 import java.util.Objects;
+import java.util.Set;
+import java.util.Map;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.logging.Level;
 
@@ -22,8 +26,23 @@ import java.util.logging.Level;
  */
 public final class PaperScheduler implements Scheduler {
 
+    private static final Map<Plugin, Set<CompletableFuture<?>>> PENDING = new ConcurrentHashMap<>();
+
     private final Plugin plugin;
     private final Executor main = this::onMain;
+
+    /** Called by CoffeeLibPlugin when a dependent plugin is disabled. */
+    public static void cancelOwner(Plugin plugin) {
+        Set<CompletableFuture<?>> pending;
+        synchronized (PENDING) {
+            pending = PENDING.remove(plugin);
+        }
+        if (pending != null) {
+            for (CompletableFuture<?> future : pending) {
+                future.completeExceptionally(new CancellationException("Owning plugin was disabled"));
+            }
+        }
+    }
 
     public PaperScheduler(Plugin plugin) {
         this.plugin = Objects.requireNonNull(plugin, "plugin");
@@ -32,9 +51,13 @@ public final class PaperScheduler implements Scheduler {
     @Override
     public void onMain(Runnable task) {
         Objects.requireNonNull(task, "task");
+        // Calling from the main thread must not bypass a disabled plugin's lifecycle.
+        if (!plugin.isEnabled()) {
+            return;
+        }
         if (Bukkit.isPrimaryThread()) {
             guarded(task).run();
-        } else if (plugin.isEnabled()) {
+        } else {
             Bukkit.getScheduler().runTask(plugin, guarded(task));
         }
     }
@@ -67,14 +90,53 @@ public final class PaperScheduler implements Scheduler {
 
     @Override
     public <T> CompletableFuture<T> onMain(CompletableFuture<T> future) {
+        Objects.requireNonNull(future, "future");
         CompletableFuture<T> result = new CompletableFuture<>();
-        future.whenComplete((value, error) -> onMain(() -> {
-            if (error != null) {
-                result.completeExceptionally(error);
-            } else {
-                result.complete(value);
+        if (!plugin.isEnabled()) {
+            result.completeExceptionally(new CancellationException("Owning plugin is disabled"));
+            return result;
+        }
+        final Set<CompletableFuture<?>> pending;
+        synchronized (PENDING) {
+            pending = PENDING.computeIfAbsent(plugin, ignored -> ConcurrentHashMap.newKeySet());
+            pending.add(result);
+        }
+        result.whenComplete((value, error) -> {
+            synchronized (PENDING) {
+                pending.remove(result);
+                if (pending.isEmpty()) {
+                    PENDING.remove(plugin, pending);
+                }
             }
-        }));
+        });
+        if (!plugin.isEnabled()) {
+            result.completeExceptionally(new CancellationException("Owning plugin is disabled"));
+        }
+        future.whenComplete((value, error) -> {
+            if (result.isDone()) {
+                return;
+            }
+            if (!plugin.isEnabled()) {
+                result.completeExceptionally(new CancellationException("Owning plugin is disabled"));
+                return;
+            }
+            try {
+                onMain(() -> {
+                    if (result.isDone()) {
+                        return;
+                    }
+                    if (!plugin.isEnabled()) {
+                        result.completeExceptionally(new CancellationException("Owning plugin is disabled"));
+                    } else if (error != null) {
+                        result.completeExceptionally(error);
+                    } else {
+                        result.complete(value);
+                    }
+                });
+            } catch (org.bukkit.plugin.IllegalPluginAccessException disabledDuringSchedule) {
+                result.completeExceptionally(new CancellationException("Owning plugin is disabled"));
+            }
+        });
         return result;
     }
 
