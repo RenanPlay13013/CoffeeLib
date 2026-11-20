@@ -102,7 +102,7 @@ public final class PaperMenus implements Listener {
         return holder.manager == this && open.contains(inventory) ? holder : null;
     }
 
-    public static synchronized void releaseOwner(JavaPlugin plugin) {
+    public static synchronized void releaseOwner(org.bukkit.plugin.Plugin plugin) {
         PaperMenus menu = INSTANCES.remove(plugin);
         if (menu == null) return;
         for (Inventory inventory : new ArrayList<>(menu.open)) {
